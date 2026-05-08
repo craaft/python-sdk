@@ -39,15 +39,15 @@ def test_custom_base_url():
 
 
 def test_base_url_from_env(monkeypatch):
-    monkeypatch.setenv("CRAAFT_BASE_URL", "http://staging.example.com/api/v1")
+    monkeypatch.setenv("CRAAFT_BASE_URL", "https://staging.example.com/api/v1")
     c = CraaftClient(api_key="cra_x")
-    assert c._transport.base_url == "http://staging.example.com/api/v1"
+    assert c._transport.base_url == "https://staging.example.com/api/v1"
 
 
 def test_base_url_arg_overrides_env(monkeypatch):
-    monkeypatch.setenv("CRAAFT_BASE_URL", "http://staging.example.com/api/v1")
-    c = CraaftClient(api_key="cra_x", base_url="http://prod.example.com/api/v1")
-    assert c._transport.base_url == "http://prod.example.com/api/v1"
+    monkeypatch.setenv("CRAAFT_BASE_URL", "https://staging.example.com/api/v1")
+    c = CraaftClient(api_key="cra_x", base_url="https://prod.example.com/api/v1")
+    assert c._transport.base_url == "https://prod.example.com/api/v1"
 
 
 def test_default_user_agent_includes_version():

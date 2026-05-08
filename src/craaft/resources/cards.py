@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 from craaft.models import Card, CardSummary, Comment
 from craaft.resources._base import BaseResource
-
-
-def _serialize_dt(value: datetime | str | None) -> str | None:
-    """Serialize a datetime for the API. Naive datetimes are assumed UTC."""
-    if value is None or isinstance(value, str):
-        return value
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.isoformat()
+from craaft.resources._utils import id_seg, serialize_dt
 
 
 class CardsResource(BaseResource):
@@ -42,18 +34,18 @@ class CardsResource(BaseResource):
         if position is not None:
             body["position"] = position
         if due_date is not None:
-            body["dueDate"] = _serialize_dt(due_date)
+            body["dueDate"] = serialize_dt(due_date)
         if assigned_user_id is not None:
             body["assignedUserId"] = assigned_user_id
         if size is not None:
             body["size"] = size
         if priority is not None:
             body["priority"] = priority
-        data = self._transport.request("PATCH", f"/cards/{card_id}", json=body)
+        data = self._transport.request("PATCH", f"/cards/{id_seg(card_id)}", json=body)
         return Card.from_api(data)
 
     def delete(self, card_id: str) -> None:
-        self._transport.request("DELETE", f"/cards/{card_id}")
+        self._transport.request("DELETE", f"/cards/{id_seg(card_id)}")
 
     def upcoming(self) -> list[CardSummary]:
         data = self._transport.request("GET", "/cards/upcoming")
@@ -66,11 +58,11 @@ class CardsResource(BaseResource):
         return [CardSummary.from_api(c) for c in data.get("cards", [])]
 
     def list_comments(self, card_id: str) -> list[Comment]:
-        data = self._transport.request("GET", f"/cards/{card_id}/comments")
+        data = self._transport.request("GET", f"/cards/{id_seg(card_id)}/comments")
         return [Comment.from_api(c) for c in data]
 
     def add_comment(self, card_id: str, *, body: str) -> Comment:
         data = self._transport.request(
-            "POST", f"/cards/{card_id}/comments", json={"body": body}
+            "POST", f"/cards/{id_seg(card_id)}/comments", json={"body": body}
         )
         return Comment.from_api(data)

@@ -29,8 +29,14 @@ class AuthenticationError(CraaftAPIError):
     """401 Unauthorized."""
 
 
-class PermissionError(CraaftAPIError):
+class CraaftPermissionError(CraaftAPIError):
     """403 Forbidden."""
+
+
+# Legacy alias - kept so older code doing `from craaft import PermissionError`
+# keeps working, but prefer `CraaftPermissionError` to avoid shadowing the
+# built-in.
+PermissionError = CraaftPermissionError
 
 
 class NotFoundError(CraaftAPIError):

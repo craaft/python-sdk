@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from craaft.models import Column
 from craaft.resources._base import BaseResource
+from craaft.resources._utils import id_seg
 
 
 class ColumnsResource(BaseResource):
@@ -28,8 +29,10 @@ class ColumnsResource(BaseResource):
             body["isDone"] = is_done
         if card_limit is not None:
             body["cardLimit"] = card_limit
-        data = self._transport.request("PATCH", f"/columns/{column_id}", json=body)
+        data = self._transport.request(
+            "PATCH", f"/columns/{id_seg(column_id)}", json=body
+        )
         return Column.from_api(data)
 
     def delete(self, column_id: str) -> None:
-        self._transport.request("DELETE", f"/columns/{column_id}")
+        self._transport.request("DELETE", f"/columns/{id_seg(column_id)}")
