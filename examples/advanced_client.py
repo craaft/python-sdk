@@ -28,11 +28,6 @@ def with_custom_session() -> CraaftClient:
     return CraaftClient(session=session)
 
 
-def with_local_server() -> CraaftClient:
-    """Point at a local instance during development."""
-    return CraaftClient(base_url="http://localhost:8080/api/v1")
-
-
 def with_named_user_agent() -> CraaftClient:
     """Set a User-Agent so server-side logs can tell your app apart from
     other consumers of the SDK."""

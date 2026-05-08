@@ -6,9 +6,9 @@ Set your token first:
 
 ```bash
 export CRAAFT_API_TOKEN=cra_...
-# optional: point at a local server
-export CRAAFT_BASE_URL=http://localhost:8080/api/v1
 ```
+
+The client talks to `https://craaft.io/api/v1` by default. Set `CRAAFT_BASE_URL` if you need to point it somewhere else.
 
 Then run any example:
 
