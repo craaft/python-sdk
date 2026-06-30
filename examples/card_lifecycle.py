@@ -32,8 +32,7 @@ def main() -> None:
         )
         print(f"Created card {card.id}")
 
-        # Step 2: set priority and a due date a week out. PATCH is where
-        # these stick reliably (POST drops them on some server builds).
+        # Step 2: set priority and a due date a week out via PATCH.
         due = datetime.now(timezone.utc) + timedelta(days=7)
         card = client.cards.update(
             card.id,

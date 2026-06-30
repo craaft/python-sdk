@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from builtins import list as _list
-from datetime import datetime
 from typing import Literal
 
-from craaft.models import Card, Column, Project
+from craaft.models import (
+    BoardMember,
+    BoardMemberGrant,
+    BoardRole,
+    Card,
+    Column,
+    Project,
+    ProjectExport,
+    Visibility,
+)
 from craaft.resources._base import BaseResource
-from craaft.resources._utils import id_seg, serialize_dt
+from craaft.resources._utils import id_seg
 
 
 class ProjectsResource(BaseResource):
@@ -34,10 +42,11 @@ class ProjectsResource(BaseResource):
         name: str | None = None,
         description: str | None = None,
         is_favorite: bool | None = None,
-        custom_css: str | None = None,
         background_image: str | None = None,
+        background_color: str | None = None,
         color_scheme: str | None = None,
         text_color: Literal["dark", "light"] | None = None,
+        visibility: Visibility | None = None,
     ) -> Project:
         body: dict[str, object] = {}
         if name is not None:
@@ -46,14 +55,16 @@ class ProjectsResource(BaseResource):
             body["description"] = description
         if is_favorite is not None:
             body["isFavorite"] = is_favorite
-        if custom_css is not None:
-            body["customCss"] = custom_css
         if background_image is not None:
             body["backgroundImage"] = background_image
+        if background_color is not None:
+            body["backgroundColor"] = background_color
         if color_scheme is not None:
             body["colorScheme"] = color_scheme
         if text_color is not None:
             body["textColor"] = text_color
+        if visibility is not None:
+            body["visibility"] = visibility
         data = self._transport.request(
             "PATCH", f"/projects/{id_seg(project_id)}", json=body
         )
@@ -61,6 +72,21 @@ class ProjectsResource(BaseResource):
 
     def delete(self, project_id: str) -> None:
         self._transport.request("DELETE", f"/projects/{id_seg(project_id)}")
+
+    def export(self, project_id: str) -> ProjectExport:
+        data = self._transport.request("GET", f"/projects/{id_seg(project_id)}/export")
+        return ProjectExport.from_api(data)
+
+    def list_tags(self, project_id: str) -> _list[str]:
+        data = self._transport.request("GET", f"/projects/{id_seg(project_id)}/tags")
+        return _list(data)
+
+    def enable_share(self, project_id: str) -> str:
+        data = self._transport.request("POST", f"/projects/{id_seg(project_id)}/share")
+        return str(data["publicToken"])
+
+    def disable_share(self, project_id: str) -> None:
+        self._transport.request("DELETE", f"/projects/{id_seg(project_id)}/share")
 
     def list_cards(self, project_id: str) -> _list[Card]:
         data = self._transport.request(
@@ -76,10 +102,6 @@ class ProjectsResource(BaseResource):
         column: str,
         position: float,
         description: str | None = None,
-        due_date: datetime | str | None = None,
-        assigned_user_id: str | None = None,
-        size: Literal["xs", "s", "m", "l", "xl"] | None = None,
-        priority: Literal["low", "normal", "high", "urgent"] | None = None,
     ) -> Card:
         body: dict[str, object] = {
             "title": title,
@@ -88,14 +110,6 @@ class ProjectsResource(BaseResource):
         }
         if description is not None:
             body["description"] = description
-        if due_date is not None:
-            body["dueDate"] = serialize_dt(due_date)
-        if assigned_user_id is not None:
-            body["assignedUserId"] = assigned_user_id
-        if size is not None:
-            body["size"] = size
-        if priority is not None:
-            body["priority"] = priority
         data = self._transport.request(
             "POST", f"/projects/{id_seg(project_id)}/cards", json=body
         )
@@ -108,3 +122,35 @@ class ProjectsResource(BaseResource):
             json={"title": title},
         )
         return Column.from_api(data)
+
+    def list_members(self, project_id: str) -> _list[BoardMember]:
+        data = self._transport.request(
+            "GET", f"/projects/{id_seg(project_id)}/members"
+        )
+        return [BoardMember.from_api(m) for m in data]
+
+    def add_member(
+        self, project_id: str, *, user_id: str, role: BoardRole
+    ) -> BoardMemberGrant:
+        data = self._transport.request(
+            "POST",
+            f"/projects/{id_seg(project_id)}/members",
+            json={"userId": user_id, "role": role},
+        )
+        return BoardMemberGrant.from_api(data)
+
+    def update_member(
+        self, project_id: str, user_id: str, *, role: BoardRole
+    ) -> BoardMemberGrant:
+        data = self._transport.request(
+            "PATCH",
+            f"/projects/{id_seg(project_id)}/members/{id_seg(user_id)}",
+            json={"role": role},
+        )
+        return BoardMemberGrant.from_api(data)
+
+    def remove_member(self, project_id: str, user_id: str) -> None:
+        self._transport.request(
+            "DELETE",
+            f"/projects/{id_seg(project_id)}/members/{id_seg(user_id)}",
+        )

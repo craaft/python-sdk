@@ -36,3 +36,9 @@ class ColumnsResource(BaseResource):
 
     def delete(self, column_id: str) -> None:
         self._transport.request("DELETE", f"/columns/{id_seg(column_id)}")
+
+    def archive(self, column_id: str) -> int:
+        data = self._transport.request(
+            "POST", f"/columns/{id_seg(column_id)}/archive"
+        )
+        return int(data["archived"])

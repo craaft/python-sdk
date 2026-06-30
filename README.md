@@ -32,11 +32,11 @@ with CraaftClient() as client:
         description="all the bits",
     )
 
-    # Some fields (priority, due_date, size) are best set via PATCH after
-    # the card exists, since POST drops them on some server builds.
+    # Metadata (priority, due_date, size, tags) is set via PATCH after create.
     client.cards.update(
         card.id,
         priority="high",
+        size=3,
         due_date=datetime.now(timezone.utc) + timedelta(days=7),
     )
 
@@ -81,25 +81,27 @@ client = CraaftClient(
 | Sub-client          | Methods |
 |---------------------|---------|
 | `client.me`         | `get()`, `update(name=, email=, username=)` |
-| `client.projects`   | `list()`, `get(id)`, `create(name=, description=)`, `update(id, ...)`, `delete(id)`, `list_cards(id)`, `create_card(id, title=, column=, position=, ...)`, `add_column(id, title=)` |
-| `client.cards`      | `update(id, ...)`, `delete(id)`, `upcoming()`, `search(q=, limit=20)`, `list_comments(id)`, `add_comment(id, body=)` |
+| `client.projects`   | `list()`, `get(id)`, `create(...)`, `update(id, ...)`, `delete(id)`, `export(id)`, `list_tags(id)`, `enable_share(id)`, `disable_share(id)`, `list_cards(id)`, `create_card(id, ...)`, `add_column(id, title=)`, `list_members(id)`, `add_member(id, ...)`, `update_member(id, ...)`, `remove_member(id, ...)` |
+| `client.cards`      | `update(id, ...)`, `delete(id)`, `move(id, ...)`, `upcoming()`, `focus()`, `hygiene(type=)`, `list_events(id)`, `search(q=, limit=20)`, `list_comments(id)`, `add_comment(id, body=)` |
+| `client.attachments`| `list_for_card(card_id)`, `upload(card_id, file=, filename=, content_type=)`, `download(attachment_id)`, `delete(attachment_id)` |
 | `client.comments`   | `update(id, body=)`, `delete(id)` |
-| `client.columns`    | `update(id, ...)`, `delete(id)` |
+| `client.columns`    | `update(id, ...)`, `delete(id)`, `archive(id)` |
+| `client.members`    | `list()`, `list_invitations()`, `create_invitation(...)` |
 
-`upcoming()` and `search()` return `list[CardSummary]` - lightweight previews with `project_name`, `column_key`, and `column_title`. Every other read returns a full `Card`.
+`upcoming()` and `search()` return `list[CardSummary]` - lightweight previews. `focus()` returns a `FocusResponse` with `due`, `attention`, and `hygiene` buckets.
 
 ## Models
 
-Frozen dataclasses, keyword-only:
+Frozen dataclasses, keyword-only. Highlights:
 
-- `User` - id, email, name, username, avatar_url, has_password
-- `Project` - id, workspace_id, name, description, is_favorite, public_token, custom_css, background_image, color_scheme, text_color, total_cards, column_counts, columns, created_at, updated_at
-- `Column` - id, key, title, color, position, is_done, card_limit
-- `Card` - id, project_id, column, title, position, description, due_date, assigned_user_id, size, priority, created_by, attachment_count, created_at, updated_at
-- `CardSummary` - id, project_id, project_name, column_key, column_title, title, description, due_date, assigned_user_id, priority, updated_at
-- `Comment` - id, card_id, author_id, body, created_at, updated_at
+- `User`, `Project`, `Column`, `Card`, `Comment`, `Attachment`
+- `CardSummary`, `AttentionCard`, `FocusResponse`, `HygieneCounts`, `CardEvent`
+- `BoardMember`, `BoardMemberGrant`, `WorkspaceMember`, `Invitation`
+- `ProjectExport` (+ nested export types)
 
-`due_date` is a timezone-aware `datetime`. Naive datetimes you pass in are treated as UTC.
+`Card.size` is an optional **integer** estimate. `Card.priority` is one of `low`, `medium`, `high`, `urgent`. Set metadata via `cards.update()` after `create_card()` - the create endpoint only accepts `title`, `column`, `position`, and optional `description`.
+
+`attachments.upload()` sends multipart form data (max **25 MiB** per file) and requires a Pro/Team workspace; use `project.can_upload_attachments` to check first.
 
 ## Errors
 

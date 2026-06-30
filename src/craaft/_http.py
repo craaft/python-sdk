@@ -36,6 +36,7 @@ _STATUS_TO_EXC: dict[int, type[exc.CraaftAPIError]] = {
     403: exc.CraaftPermissionError,
     404: exc.NotFoundError,
     409: exc.ConflictError,
+    413: exc.ValidationError,
     422: exc.ValidationError,
     429: exc.RateLimitError,
 }
@@ -227,6 +228,9 @@ class Transport:
         *,
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        parse_json: bool = True,
+        max_response_bytes: int | None = None,
     ) -> Any:
         url = self.base_url.rstrip("/") + path
         method = method.upper()
@@ -234,6 +238,11 @@ class Transport:
         last_response: requests.Response | None = None
         last_response_body: bytes = b""
         last_exc: BaseException | None = None
+        body_limit = (
+            max_response_bytes
+            if max_response_bytes is not None
+            else self.max_response_bytes
+        )
 
         for attempt in range(attempts):
             start = time.monotonic()
@@ -243,7 +252,8 @@ class Transport:
                     method=method,
                     url=url,
                     params=params,
-                    json=json,
+                    json=json if files is None else None,
+                    files=files,
                     timeout=self.timeout,
                     # Don't follow redirects: cross-origin redirects could
                     # leak the bearer token, and the API doesn't redirect.
@@ -289,7 +299,7 @@ class Transport:
                     raise exc.CraaftConnectionError(str(e)) from e
             else:
                 try:
-                    body = _read_body(resp, self.max_response_bytes)
+                    body = _read_body(resp, body_limit)
                 finally:
                     resp.close()
                 last_response = resp
@@ -306,6 +316,8 @@ class Transport:
                 if 200 <= resp.status_code < 300:
                     if resp.status_code == 204 or not body:
                         return None
+                    if not parse_json:
+                        return body
                     try:
                         return _json.loads(body)
                     except (ValueError, _json.JSONDecodeError) as e:

@@ -55,6 +55,15 @@ def test_delete():
 
 
 @responses.activate
+def test_archive():
+    responses.add(
+        responses.POST, f"{BASE}/columns/c1/archive", json={"archived": 3}, status=200
+    )
+    c = CraaftClient(api_key="cra_x")
+    assert c.columns.archive("c1") == 3
+
+
+@responses.activate
 def test_delete_409_conflict():
     responses.add(
         responses.DELETE, f"{BASE}/columns/c1", json={"error": "non-empty"}, status=409

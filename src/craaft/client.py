@@ -17,10 +17,12 @@ import requests
 from craaft._http import RetryConfig, Transport
 from craaft._version import __version__
 from craaft.exceptions import CraaftError
+from craaft.resources.attachments import AttachmentsResource
 from craaft.resources.cards import CardsResource
 from craaft.resources.columns import ColumnsResource
 from craaft.resources.comments import CommentsResource
 from craaft.resources.me import MeResource
+from craaft.resources.members import MembersResource
 from craaft.resources.projects import ProjectsResource
 
 DEFAULT_BASE_URL = "https://craaft.io/api/v1"
@@ -127,8 +129,10 @@ class CraaftClient:
         self.me = MeResource(self._transport)
         self.projects = ProjectsResource(self._transport)
         self.cards = CardsResource(self._transport)
+        self.attachments = AttachmentsResource(self._transport)
         self.comments = CommentsResource(self._transport)
         self.columns = ColumnsResource(self._transport)
+        self.members = MembersResource(self._transport)
 
     def close(self) -> None:
         self._transport.close()

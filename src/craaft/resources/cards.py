@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from builtins import list as _list
 from datetime import datetime
-from typing import Literal
 
-from craaft.models import Card, CardSummary, Comment
+from craaft.models import (
+    AttentionCard,
+    Card,
+    CardEvent,
+    CardSummary,
+    Comment,
+    FocusResponse,
+    HygieneType,
+    Priority,
+)
 from craaft.resources._base import BaseResource
 from craaft.resources._utils import id_seg, serialize_dt
 
@@ -21,8 +30,9 @@ class CardsResource(BaseResource):
         position: float | None = None,
         due_date: datetime | str | None = None,
         assigned_user_id: str | None = None,
-        size: Literal["xs", "s", "m", "l", "xl"] | None = None,
-        priority: Literal["low", "normal", "high", "urgent"] | None = None,
+        size: int | None = None,
+        priority: Priority | None = None,
+        tags: list[str] | None = None,
     ) -> Card:
         body: dict[str, object] = {}
         if title is not None:
@@ -41,23 +51,49 @@ class CardsResource(BaseResource):
             body["size"] = size
         if priority is not None:
             body["priority"] = priority
+        if tags is not None:
+            body["tags"] = tags
         data = self._transport.request("PATCH", f"/cards/{id_seg(card_id)}", json=body)
         return Card.from_api(data)
 
     def delete(self, card_id: str) -> None:
         self._transport.request("DELETE", f"/cards/{id_seg(card_id)}")
 
-    def upcoming(self) -> list[CardSummary]:
+    def move(
+        self, card_id: str, *, target_project_id: str, column: str
+    ) -> Card:
+        data = self._transport.request(
+            "POST",
+            f"/cards/{id_seg(card_id)}/move",
+            json={"targetProjectId": target_project_id, "column": column},
+        )
+        return Card.from_api(data)
+
+    def upcoming(self) -> _list[CardSummary]:
         data = self._transport.request("GET", "/cards/upcoming")
         return [CardSummary.from_api(c) for c in data]
 
-    def search(self, *, q: str, limit: int = 20) -> list[CardSummary]:
+    def focus(self) -> FocusResponse:
+        data = self._transport.request("GET", "/cards/focus")
+        return FocusResponse.from_api(data)
+
+    def hygiene(self, *, type: HygieneType) -> _list[AttentionCard]:
+        data = self._transport.request(
+            "GET", "/cards/hygiene", params={"type": type}
+        )
+        return [AttentionCard.from_api(c) for c in data]
+
+    def list_events(self, card_id: str) -> _list[CardEvent]:
+        data = self._transport.request("GET", f"/cards/{id_seg(card_id)}/events")
+        return [CardEvent.from_api(e) for e in data]
+
+    def search(self, *, q: str, limit: int = 20) -> _list[CardSummary]:
         if not 1 <= limit <= 50:
             raise ValueError("limit must be between 1 and 50")
         data = self._transport.request("GET", "/search", params={"q": q, "limit": limit})
         return [CardSummary.from_api(c) for c in data.get("cards", [])]
 
-    def list_comments(self, card_id: str) -> list[Comment]:
+    def list_comments(self, card_id: str) -> _list[Comment]:
         data = self._transport.request("GET", f"/cards/{id_seg(card_id)}/comments")
         return [Comment.from_api(c) for c in data]
 

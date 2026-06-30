@@ -17,10 +17,11 @@ def _proj():
         "description": None,
         "isFavorite": False,
         "publicToken": None,
-        "customCss": None,
         "backgroundImage": None,
+        "backgroundColor": None,
         "colorScheme": None,
         "textColor": "light",
+        "canUploadAttachments": False,
         "totalCards": 0,
         "columnCounts": {},
         "columns": [],
@@ -43,6 +44,7 @@ def _card():
         "priority": None,
         "createdBy": None,
         "attachmentCount": 0,
+        "tags": [],
         "createdAt": "2026-05-08T10:00:00Z",
         "updatedAt": "2026-05-08T10:00:00Z",
     }
@@ -121,20 +123,22 @@ def test_update_translates_snake_case_to_camel_case():
         name="New",
         description="d",
         is_favorite=True,
-        custom_css=".x{}",
         background_image="https://example.com/bg.png",
+        background_color="#aabbcc",
         color_scheme="midnight",
         text_color="dark",
+        visibility="workspace",
     )
     body = json.loads(responses.calls[0].request.body)
     assert body == {
         "name": "New",
         "description": "d",
         "isFavorite": True,
-        "customCss": ".x{}",
         "backgroundImage": "https://example.com/bg.png",
+        "backgroundColor": "#aabbcc",
         "colorScheme": "midnight",
         "textColor": "dark",
+        "visibility": "workspace",
     }
 
 
@@ -173,7 +177,7 @@ def test_create_card_required_fields_only():
 
 
 @responses.activate
-def test_create_card_full():
+def test_create_card_with_description():
     responses.add(responses.POST, f"{BASE}/projects/p1/cards", json=_card(), status=201)
     c = CraaftClient(api_key="cra_x")
     c.projects.create_card(
@@ -182,10 +186,6 @@ def test_create_card_full():
         column="todo",
         position=1.0,
         description="d",
-        due_date="2026-06-01T10:00:00+00:00",
-        assigned_user_id="u1",
-        size="m",
-        priority="high",
     )
     body = json.loads(responses.calls[0].request.body)
     assert body == {
@@ -193,28 +193,7 @@ def test_create_card_full():
         "column": "todo",
         "position": 1.0,
         "description": "d",
-        "dueDate": "2026-06-01T10:00:00+00:00",
-        "assignedUserId": "u1",
-        "size": "m",
-        "priority": "high",
     }
-
-
-@responses.activate
-def test_create_card_accepts_datetime_object():
-    from datetime import datetime, timezone
-
-    responses.add(responses.POST, f"{BASE}/projects/p1/cards", json=_card(), status=201)
-    c = CraaftClient(api_key="cra_x")
-    c.projects.create_card(
-        "p1",
-        title="x",
-        column="todo",
-        position=1.0,
-        due_date=datetime(2026, 6, 1, 10, 0, 0, tzinfo=timezone.utc),
-    )
-    body = json.loads(responses.calls[0].request.body)
-    assert body["dueDate"] == "2026-06-01T10:00:00+00:00"
 
 
 @responses.activate

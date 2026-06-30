@@ -23,6 +23,7 @@ def _card(extras: dict | None = None) -> dict:
         "priority": None,
         "createdBy": None,
         "attachmentCount": 0,
+        "tags": [],
         "createdAt": "2026-05-08T10:00:00Z",
         "updatedAt": "2026-05-08T10:00:00Z",
     }
@@ -68,8 +69,9 @@ def test_update_translates_fields():
         position=2.0,
         due_date="2026-06-01T10:00:00+00:00",
         assigned_user_id="u2",
-        size="l",
+        size=5,
         priority="urgent",
+        tags=["launch"],
     )
     body = json.loads(responses.calls[0].request.body)
     assert body == {
@@ -79,8 +81,9 @@ def test_update_translates_fields():
         "position": 2.0,
         "dueDate": "2026-06-01T10:00:00+00:00",
         "assignedUserId": "u2",
-        "size": "l",
+        "size": 5,
         "priority": "urgent",
+        "tags": ["launch"],
     }
 
 
