@@ -19,10 +19,12 @@ from craaft._version import __version__
 from craaft.exceptions import CraaftError
 from craaft.resources.attachments import AttachmentsResource
 from craaft.resources.cards import CardsResource
+from craaft.resources.checklist import ChecklistResource
 from craaft.resources.columns import ColumnsResource
 from craaft.resources.comments import CommentsResource
 from craaft.resources.me import MeResource
 from craaft.resources.members import MembersResource
+from craaft.resources.milestones import MilestonesResource
 from craaft.resources.projects import ProjectsResource
 
 DEFAULT_BASE_URL = "https://craaft.io/api/v1"
@@ -133,6 +135,8 @@ class CraaftClient:
         self.comments = CommentsResource(self._transport)
         self.columns = ColumnsResource(self._transport)
         self.members = MembersResource(self._transport)
+        self.checklist = ChecklistResource(self._transport)
+        self.milestones = MilestonesResource(self._transport)
 
     def close(self) -> None:
         self._transport.close()

@@ -4,7 +4,12 @@ import pytest
 import responses
 
 from craaft import CraaftClient
-from craaft.exceptions import NotFoundError, PlanLimitError
+from craaft.exceptions import (
+    CraaftPermissionError,
+    NotFoundError,
+    PlanLimitError,
+    ValidationError,
+)
 
 BASE = "https://craaft.io/api/v1"
 
@@ -194,6 +199,166 @@ def test_create_card_with_description():
         "position": 1.0,
         "description": "d",
     }
+
+
+def _milestone(extras: dict | None = None) -> dict:
+    base = {
+        "id": "m1",
+        "projectId": "p1",
+        "name": "Beta launch",
+        "dueOn": "2026-09-01",
+        "achievedAt": None,
+        "createdAt": "2026-07-18T10:00:00Z",
+        "updatedAt": "2026-07-18T10:00:00Z",
+    }
+    if extras:
+        base.update(extras)
+    return base
+
+
+@responses.activate
+def test_bulk_create_cards():
+    payload = {"cards": [_card(), dict(_card(), id="card2")]}
+    responses.add(
+        responses.POST, f"{BASE}/projects/p1/cards/bulk", json=payload, status=201
+    )
+    c = CraaftClient(api_key="cra_x")
+    cards = c.projects.bulk_create_cards(
+        "p1",
+        [
+            {"title": "Ship it", "column": "todo"},
+            {
+                "title": "Review copy",
+                "column": "doing",
+                "position": 2.5,
+                "description": "Markdown ok",
+                "assignedUserId": "u2",
+                "size": 3,
+                "priority": "high",
+                "tags": ["launch"],
+            },
+        ],
+    )
+    assert [card.id for card in cards] == ["card1", "card2"]
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {
+        "cards": [
+            {"title": "Ship it", "column": "todo"},
+            {
+                "title": "Review copy",
+                "column": "doing",
+                "position": 2.5,
+                "description": "Markdown ok",
+                "assignedUserId": "u2",
+                "size": 3,
+                "priority": "high",
+                "tags": ["launch"],
+            },
+        ]
+    }
+
+
+@responses.activate
+def test_bulk_create_cards_serializes_datetime_due_date():
+    from datetime import datetime, timezone
+
+    responses.add(
+        responses.POST,
+        f"{BASE}/projects/p1/cards/bulk",
+        json={"cards": [_card()]},
+        status=201,
+    )
+    c = CraaftClient(api_key="cra_x")
+    c.projects.bulk_create_cards(
+        "p1",
+        [
+            {
+                "title": "x",
+                "column": "todo",
+                "dueDate": datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc),
+            }
+        ],
+    )
+    body = json.loads(responses.calls[0].request.body)
+    assert body["cards"][0]["dueDate"] == "2026-08-01T12:00:00+00:00"
+
+
+def test_bulk_create_cards_item_count_validation():
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValueError):
+        c.projects.bulk_create_cards("p1", [])
+    with pytest.raises(ValueError):
+        c.projects.bulk_create_cards(
+            "p1", [{"title": str(i), "column": "todo"} for i in range(101)]
+        )
+
+
+@responses.activate
+def test_bulk_create_cards_400_names_offending_index():
+    responses.add(
+        responses.POST,
+        f"{BASE}/projects/p1/cards/bulk",
+        json={"error": "cards[3]: title is required"},
+        status=400,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValidationError) as exc_info:
+        c.projects.bulk_create_cards("p1", [{"title": "", "column": "todo"}])
+    assert exc_info.value.message == "cards[3]: title is required"
+
+
+@responses.activate
+def test_list_milestones():
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/p1/milestones",
+        json=[_milestone(), _milestone({"id": "m2", "achievedAt": "2026-07-01T09:00:00Z"})],
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    milestones = c.projects.list_milestones("p1")
+    assert [m.id for m in milestones] == ["m1", "m2"]
+    assert milestones[0].achieved_at is None
+    assert milestones[1].achieved_at is not None
+    assert str(milestones[0].due_on) == "2026-09-01"
+
+
+@responses.activate
+def test_add_milestone_with_date_object():
+    from datetime import date
+
+    responses.add(
+        responses.POST, f"{BASE}/projects/p1/milestones", json=_milestone(), status=201
+    )
+    c = CraaftClient(api_key="cra_x")
+    m = c.projects.add_milestone("p1", name="Beta launch", due_on=date(2026, 9, 1))
+    assert m.name == "Beta launch"
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"name": "Beta launch", "dueOn": "2026-09-01"}
+
+
+@responses.activate
+def test_add_milestone_with_string_date():
+    responses.add(
+        responses.POST, f"{BASE}/projects/p1/milestones", json=_milestone(), status=201
+    )
+    c = CraaftClient(api_key="cra_x")
+    c.projects.add_milestone("p1", name="Beta launch", due_on="2026-09-01")
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"name": "Beta launch", "dueOn": "2026-09-01"}
+
+
+@responses.activate
+def test_add_milestone_403_for_non_admin():
+    responses.add(
+        responses.POST,
+        f"{BASE}/projects/p1/milestones",
+        json={"error": "board admin required"},
+        status=403,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(CraaftPermissionError):
+        c.projects.add_milestone("p1", name="Beta launch", due_on="2026-09-01")
 
 
 @responses.activate

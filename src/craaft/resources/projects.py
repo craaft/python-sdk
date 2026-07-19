@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from builtins import list as _list
-from typing import Literal
+from datetime import date
+from typing import Any, Literal
 
 from craaft.models import (
     BoardMember,
@@ -9,12 +10,13 @@ from craaft.models import (
     BoardRole,
     Card,
     Column,
+    Milestone,
     Project,
     ProjectExport,
     Visibility,
 )
 from craaft.resources._base import BaseResource
-from craaft.resources._utils import id_seg
+from craaft.resources._utils import id_seg, prepare_bulk_cards, serialize_date
 
 
 class ProjectsResource(BaseResource):
@@ -114,6 +116,49 @@ class ProjectsResource(BaseResource):
             "POST", f"/projects/{id_seg(project_id)}/cards", json=body
         )
         return Card.from_api(data)
+
+    def bulk_create_cards(
+        self, project_id: str, cards: _list[dict[str, Any]]
+    ) -> _list[Card]:
+        """Create up to 100 cards in one all-or-nothing transaction.
+
+        Each item is a dict with the API's camelCase key names: ``title`` and
+        ``column`` are required; ``description``, ``position`` (omit to append
+        to the end of the column), ``dueDate``, ``assignedUserId``, ``size``,
+        ``priority``, and ``tags`` are optional. ``datetime`` values under
+        ``dueDate`` are serialized for you. Unlike :meth:`create_card`, the
+        assignee is NOT defaulted to the caller. One invalid item fails the
+        whole batch with a :class:`~craaft.exceptions.ValidationError` whose
+        message names the offending index (``cards[3]: ...``). Bulk requests
+        never send notification emails. Returns the created cards in request
+        order.
+        """
+        body = {"cards": prepare_bulk_cards(cards)}
+        data = self._transport.request(
+            "POST", f"/projects/{id_seg(project_id)}/cards/bulk", json=body
+        )
+        return [Card.from_api(c) for c in data["cards"]]
+
+    def list_milestones(self, project_id: str) -> _list[Milestone]:
+        data = self._transport.request(
+            "GET", f"/projects/{id_seg(project_id)}/milestones"
+        )
+        return [Milestone.from_api(m) for m in data]
+
+    def add_milestone(
+        self, project_id: str, *, name: str, due_on: date | str
+    ) -> Milestone:
+        """Add a milestone (board admins only - non-admin members get a 403).
+
+        ``due_on`` is a plain calendar date (``YYYY-MM-DD``); a ``date``
+        instance is serialized for you.
+        """
+        data = self._transport.request(
+            "POST",
+            f"/projects/{id_seg(project_id)}/milestones",
+            json={"name": name, "dueOn": serialize_date(due_on)},
+        )
+        return Milestone.from_api(data)
 
     def add_column(self, project_id: str, *, title: str) -> Column:
         data = self._transport.request(

@@ -185,6 +185,181 @@ def test_search_400_raises_validation():
         c.cards.search(q="")
 
 
+def _checklist_item(extras: dict | None = None) -> dict:
+    base = {
+        "id": "cl1",
+        "cardId": "card1",
+        "text": "write tests",
+        "done": False,
+        "position": 1.0,
+        "createdAt": "2026-07-18T10:00:00Z",
+        "updatedAt": "2026-07-18T10:00:00Z",
+    }
+    if extras:
+        base.update(extras)
+    return base
+
+
+@responses.activate
+def test_bulk_update_passes_items_verbatim():
+    payload = {"cards": [_card(), _card({"id": "card2"})]}
+    responses.add(responses.PATCH, f"{BASE}/cards/bulk", json=payload, status=200)
+    c = CraaftClient(api_key="cra_x")
+    cards = c.cards.bulk_update(
+        [
+            {"id": "card1", "title": "Renamed", "priority": "urgent"},
+            {"id": "card2", "column": "done", "position": 12.0},
+        ]
+    )
+    assert [card.id for card in cards] == ["card1", "card2"]
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {
+        "cards": [
+            {"id": "card1", "title": "Renamed", "priority": "urgent"},
+            {"id": "card2", "column": "done", "position": 12.0},
+        ]
+    }
+
+
+@responses.activate
+def test_bulk_update_sends_null_to_clear():
+    responses.add(
+        responses.PATCH, f"{BASE}/cards/bulk", json={"cards": [_card()]}, status=200
+    )
+    c = CraaftClient(api_key="cra_x")
+    c.cards.bulk_update([{"id": "card1", "dueDate": None, "assignedUserId": None}])
+    # A key present with None must survive as JSON null (clear), and absent
+    # keys must stay absent (leave alone).
+    body = json.loads(responses.calls[0].request.body)
+    assert body["cards"][0] == {"id": "card1", "dueDate": None, "assignedUserId": None}
+    assert "priority" not in body["cards"][0]
+
+
+@responses.activate
+def test_bulk_update_serializes_datetime_due_date():
+    from datetime import datetime, timezone
+
+    responses.add(
+        responses.PATCH, f"{BASE}/cards/bulk", json={"cards": [_card()]}, status=200
+    )
+    c = CraaftClient(api_key="cra_x")
+    items = [{"id": "card1", "dueDate": datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)}]
+    c.cards.bulk_update(items)
+    body = json.loads(responses.calls[0].request.body)
+    assert body["cards"][0]["dueDate"] == "2026-08-01T12:00:00+00:00"
+    # The caller's dict must not be mutated.
+    assert isinstance(items[0]["dueDate"], datetime)
+
+
+def test_bulk_update_item_count_validation():
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValueError):
+        c.cards.bulk_update([])
+    with pytest.raises(ValueError):
+        c.cards.bulk_update([{"id": str(i)} for i in range(101)])
+
+
+@responses.activate
+def test_bulk_update_400_names_offending_index():
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/cards/bulk",
+        json={"error": "cards[3]: title is required"},
+        status=400,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValidationError) as exc_info:
+        c.cards.bulk_update([{"id": "card1", "title": ""}])
+    assert exc_info.value.message == "cards[3]: title is required"
+
+
+@responses.activate
+def test_bulk_move_same_board():
+    payload = {"cards": [_card({"column": "done"})]}
+    responses.add(responses.POST, f"{BASE}/cards/bulk/move", json=payload, status=200)
+    c = CraaftClient(api_key="cra_x")
+    cards = c.cards.bulk_move(["card1"], column="done")
+    assert cards[0].column == "done"
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"ids": ["card1"], "column": "done"}
+
+
+@responses.activate
+def test_bulk_move_to_other_board():
+    payload = {"cards": [_card({"projectId": "p2", "column": "todo"})]}
+    responses.add(responses.POST, f"{BASE}/cards/bulk/move", json=payload, status=200)
+    c = CraaftClient(api_key="cra_x")
+    cards = c.cards.bulk_move(["card1"], column="todo", target_project_id="p2")
+    assert cards[0].project_id == "p2"
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"ids": ["card1"], "column": "todo", "targetProjectId": "p2"}
+
+
+def test_bulk_move_item_count_validation():
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValueError):
+        c.cards.bulk_move([], column="done")
+    with pytest.raises(ValueError):
+        c.cards.bulk_move([str(i) for i in range(101)], column="done")
+
+
+@responses.activate
+def test_bulk_move_400_when_ids_span_boards():
+    responses.add(
+        responses.POST,
+        f"{BASE}/cards/bulk/move",
+        json={"error": "cards must belong to the same project"},
+        status=400,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValidationError):
+        c.cards.bulk_move(["card1", "card2"], column="done")
+
+
+@responses.activate
+def test_bulk_move_422_unknown_column():
+    responses.add(
+        responses.POST,
+        f"{BASE}/cards/bulk/move",
+        json={"error": "column does not exist"},
+        status=422,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValidationError):
+        c.cards.bulk_move(["card1"], column="nope", target_project_id="p2")
+
+
+@responses.activate
+def test_list_checklist():
+    responses.add(
+        responses.GET,
+        f"{BASE}/cards/card1/checklist",
+        json=[_checklist_item(), _checklist_item({"id": "cl2", "done": True})],
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    items = c.cards.list_checklist("card1")
+    assert [i.id for i in items] == ["cl1", "cl2"]
+    assert items[0].done is False
+    assert items[1].done is True
+    assert items[0].card_id == "card1"
+
+
+@responses.activate
+def test_add_checklist_item():
+    responses.add(
+        responses.POST,
+        f"{BASE}/cards/card1/checklist",
+        json=_checklist_item(),
+        status=201,
+    )
+    c = CraaftClient(api_key="cra_x")
+    item = c.cards.add_checklist_item("card1", text="write tests")
+    assert item.text == "write tests"
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"text": "write tests"}
+
+
 @responses.activate
 def test_list_comments():
     responses.add(responses.GET, f"{BASE}/cards/card1/comments", json=[_comment()], status=200)

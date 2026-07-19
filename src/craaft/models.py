@@ -8,7 +8,7 @@ and tolerates extra unknown keys (forward-compat with new server fields).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 
@@ -22,6 +22,10 @@ def _parse_dt_optional(value: str | None) -> datetime | None:
     if value is None:
         return None
     return _parse_dt(value)
+
+
+def _parse_date(value: str) -> date:
+    return date.fromisoformat(value)
 
 
 Priority = Literal["low", "medium", "high", "urgent"]
@@ -111,6 +115,8 @@ class Card:
     updated_by: str | None
     updated_by_name: str | None
     attachment_count: int
+    checklist_done: int
+    checklist_total: int
     tags: list[str]
     created_at: datetime
     updated_at: datetime
@@ -136,6 +142,8 @@ class Card:
             updated_by=data.get("updatedBy"),
             updated_by_name=data.get("updatedByName"),
             attachment_count=int(data.get("attachmentCount", 0)),
+            checklist_done=int(data.get("checklistDone", 0)),
+            checklist_total=int(data.get("checklistTotal", 0)),
             tags=tags,
             created_at=_parse_dt(data["createdAt"]),
             updated_at=_parse_dt(data["updatedAt"]),
@@ -314,6 +322,52 @@ class Comment:
             body=data["body"],
             created_at=_parse_dt(data["createdAt"]),
             updated_at=_parse_dt(data.get("updatedAt", data["createdAt"])),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ChecklistItem:
+    id: str
+    card_id: str
+    text: str
+    done: bool
+    position: float
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> ChecklistItem:
+        return cls(
+            id=data["id"],
+            card_id=data["cardId"],
+            text=data["text"],
+            done=bool(data.get("done", False)),
+            position=float(data["position"]),
+            created_at=_parse_dt(data["createdAt"]),
+            updated_at=_parse_dt(data["updatedAt"]),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Milestone:
+    id: str
+    project_id: str
+    name: str
+    due_on: date
+    achieved_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> Milestone:
+        return cls(
+            id=data["id"],
+            project_id=data["projectId"],
+            name=data["name"],
+            due_on=_parse_date(data["dueOn"]),
+            achieved_at=_parse_dt_optional(data.get("achievedAt")),
+            created_at=_parse_dt(data["createdAt"]),
+            updated_at=_parse_dt(data["updatedAt"]),
         )
 
 

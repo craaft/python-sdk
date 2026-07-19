@@ -1,6 +1,6 @@
 # Craaft Python SDK
 
-A small, synchronous Python client for the [Craaft API](https://craaft.io). It wraps the REST endpoints with typed dataclasses, a sensible retry policy, and a friendly exception hierarchy.
+The official Python client for the [Craaft API](https://craaft.io). It wraps the REST endpoints with typed dataclasses, a sensible retry policy, and a friendly exception hierarchy.
 
 ## Install
 
@@ -81,25 +81,67 @@ client = CraaftClient(
 | Sub-client          | Methods |
 |---------------------|---------|
 | `client.me`         | `get()`, `update(name=, email=, username=)` |
-| `client.projects`   | `list()`, `get(id)`, `create(...)`, `update(id, ...)`, `delete(id)`, `export(id)`, `list_tags(id)`, `enable_share(id)`, `disable_share(id)`, `list_cards(id)`, `create_card(id, ...)`, `add_column(id, title=)`, `list_members(id)`, `add_member(id, ...)`, `update_member(id, ...)`, `remove_member(id, ...)` |
-| `client.cards`      | `update(id, ...)`, `delete(id)`, `move(id, ...)`, `upcoming()`, `focus()`, `hygiene(type=)`, `list_events(id)`, `search(q=, limit=20)`, `list_comments(id)`, `add_comment(id, body=)` |
+| `client.projects`   | `list()`, `get(id)`, `create(...)`, `update(id, ...)`, `delete(id)`, `export(id)`, `list_tags(id)`, `enable_share(id)`, `disable_share(id)`, `list_cards(id)`, `create_card(id, ...)`, `bulk_create_cards(id, cards)`, `list_milestones(id)`, `add_milestone(id, name=, due_on=)`, `add_column(id, title=)`, `list_members(id)`, `add_member(id, ...)`, `update_member(id, ...)`, `remove_member(id, ...)` |
+| `client.cards`      | `update(id, ...)`, `bulk_update(cards)`, `bulk_move(ids, column=, target_project_id=)`, `delete(id)`, `move(id, ...)`, `upcoming()`, `focus()`, `hygiene(type=)`, `list_events(id)`, `search(q=, limit=20)`, `list_comments(id)`, `add_comment(id, body=)`, `list_checklist(id)`, `add_checklist_item(id, text=)` |
 | `client.attachments`| `list_for_card(card_id)`, `upload(card_id, file=, filename=, content_type=)`, `download(attachment_id)`, `delete(attachment_id)` |
 | `client.comments`   | `update(id, body=)`, `delete(id)` |
+| `client.checklist`  | `update(id, text=, done=)`, `delete(id)` |
 | `client.columns`    | `update(id, ...)`, `delete(id)`, `archive(id)` |
+| `client.milestones` | `update(id, name=, due_on=, achieved=)`, `delete(id)` |
 | `client.members`    | `list()`, `list_invitations()`, `create_invitation(...)` |
 
 `upcoming()` and `search()` return `list[CardSummary]` - lightweight previews. `focus()` returns a `FocusResponse` with `due`, `attention`, and `hygiene` buckets.
+
+## Bulk operations
+
+Three methods batch card work into a single all-or-nothing transaction (max 100 items each). Items are dicts using the API's camelCase field names, passed through verbatim:
+
+```python
+# Create - title and column required per item; position omitted = append.
+# Unlike create_card, the assignee is NOT defaulted to the caller.
+cards = client.projects.bulk_create_cards(project.id, [
+    {"title": "Ship it", "column": "todo"},
+    {"title": "Review copy", "column": "doing", "priority": "high", "tags": ["launch"]},
+])
+
+# Update - {"id": ...} plus any single-PATCH fields. A key set to None sends
+# JSON null and CLEARS the field (dueDate, assignedUserId, size, priority);
+# an absent key leaves the field alone.
+client.cards.bulk_update([
+    {"id": cards[0].id, "priority": "urgent"},
+    {"id": cards[1].id, "dueDate": None},
+])
+
+# Move - sweep cards to a column on their own board, or to another board in
+# the same workspace via target_project_id.
+client.cards.bulk_move([c.id for c in cards], column="done")
+```
+
+One invalid item rolls back the whole batch; the raised `ValidationError`'s message names the offending index (`cards[3]: title is required`). Bulk requests never send notification emails. `datetime` values under `dueDate` are serialized for you.
+
+## Checklists and milestones
+
+Per-card checklists (any board member may write) and per-project milestones (board admins only - `CraaftPermissionError` on 403):
+
+```python
+item = client.cards.add_checklist_item(card.id, text="write tests")
+client.checklist.update(item.id, done=True)
+
+m = client.projects.add_milestone(project.id, name="Beta", due_on=date(2026, 9, 1))
+client.milestones.update(m.id, achieved=True)   # stamps achieved_at once
+```
 
 ## Models
 
 Frozen dataclasses, keyword-only. Highlights:
 
 - `User`, `Project`, `Column`, `Card`, `Comment`, `Attachment`
+- `ChecklistItem`, `Milestone` (`due_on` is a `datetime.date`; `achieved_at` is `datetime | None`)
 - `CardSummary`, `AttentionCard`, `FocusResponse`, `HygieneCounts`, `CardEvent`
 - `BoardMember`, `BoardMemberGrant`, `WorkspaceMember`, `Invitation`
 - `ProjectExport` (+ nested export types)
 
-`Card.size` is an optional **integer** estimate. `Card.priority` is one of `low`, `medium`, `high`, `urgent`. Set metadata via `cards.update()` after `create_card()` - the create endpoint only accepts `title`, `column`, `position`, and optional `description`.
+`Card.size` is an optional **integer** estimate. `Card.priority` is one of `low`, `medium`, `high`, `urgent`. `Card.checklist_done` / `Card.checklist_total` are denormalized checklist progress counts (0 when the card has no checklist). Set metadata via `cards.update()` after `create_card()` - the create endpoint only accepts `title`, `column`, `position`, and optional `description`.
 
 `attachments.upload()` sends multipart form data (max **25 MiB** per file) and requires a Pro/Team workspace; use `project.can_upload_attachments` to check first.
 
