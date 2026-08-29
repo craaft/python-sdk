@@ -26,6 +26,7 @@ from craaft.resources.me import MeResource
 from craaft.resources.members import MembersResource
 from craaft.resources.milestones import MilestonesResource
 from craaft.resources.projects import ProjectsResource
+from craaft.resources.public import PublicResource
 
 DEFAULT_BASE_URL = "https://craaft.io/api/v1"
 DEFAULT_TIMEOUT = 30.0
@@ -137,6 +138,17 @@ class CraaftClient:
         self.members = MembersResource(self._transport)
         self.checklist = ChecklistResource(self._transport)
         self.milestones = MilestonesResource(self._transport)
+        self.public = PublicResource(self._transport)
+
+    def version(self) -> dict[str, Any]:
+        """Return the server's build info.
+
+        Unauthenticated and cheap, which makes it the right liveness probe
+        for a self-hosted deployment - use it instead of a real endpoint
+        when all you want to know is whether the host is up.
+        """
+        data = self._transport.request("GET", "/version")
+        return dict(data)
 
     def close(self) -> None:
         self._transport.close()

@@ -376,3 +376,54 @@ def test_add_comment():
     assert cm.id == "cm1"
     body = json.loads(responses.calls[0].request.body)
     assert body == {"body": "hi"}
+
+
+@responses.activate
+def test_get_fetches_a_single_card():
+    responses.add(
+        responses.GET,
+        f"{BASE}/cards/card1",
+        json=_card({"title": "Fetched"}),
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    card = c.cards.get("card1")
+    assert card.id == "card1"
+    assert card.title == "Fetched"
+    assert responses.calls[0].request.method == "GET"
+
+
+@responses.activate
+def test_get_escapes_the_id():
+    # Ids arrive from callers unvalidated; a traversal-shaped one must not
+    # rewrite the request path.
+    responses.add(responses.GET, f"{BASE}/cards/..%2F..%2Fadmin", json=_card())
+    c = CraaftClient(api_key="cra_x")
+    c.cards.get("../../admin")
+    assert "/cards/..%2F..%2Fadmin" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_card_reads_following_flag():
+    # The API has always returned `following`; the model used to drop it.
+    responses.add(responses.GET, f"{BASE}/cards/card1", json=_card({"following": True}))
+    c = CraaftClient(api_key="cra_x")
+    assert c.cards.get("card1").following is True
+
+
+@responses.activate
+def test_card_following_defaults_false_when_absent():
+    responses.add(responses.GET, f"{BASE}/cards/card1", json=_card())
+    c = CraaftClient(api_key="cra_x")
+    assert c.cards.get("card1").following is False
+
+
+@responses.activate
+def test_follow_and_unfollow_send_204_shaped_calls():
+    responses.add(responses.POST, f"{BASE}/cards/card1/follow", status=204)
+    responses.add(responses.DELETE, f"{BASE}/cards/card1/follow", status=204)
+    c = CraaftClient(api_key="cra_x")
+    assert c.cards.follow("card1") is None
+    assert c.cards.unfollow("card1") is None
+    assert responses.calls[0].request.method == "POST"
+    assert responses.calls[1].request.method == "DELETE"

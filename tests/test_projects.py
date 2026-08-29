@@ -369,3 +369,135 @@ def test_add_column():
     assert col.title == "To Do"
     body = json.loads(responses.calls[0].request.body)
     assert body == {"title": "To Do"}
+
+
+@responses.activate
+def test_rebalance_cards_posts_ids_in_order():
+    responses.add(
+        responses.POST,
+        f"{BASE}/projects/p1/cards/rebalance",
+        json={"cards": [_card()]},
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    c.projects.rebalance_cards("p1", ["c3", "c1", "c2"], column="doing")
+    body = json.loads(responses.calls[0].request.body)
+    # Request order IS the resulting order, so it must survive verbatim.
+    assert body == {"ids": ["c3", "c1", "c2"], "column": "doing"}
+
+
+@responses.activate
+def test_rebalance_cards_rejects_an_empty_list_before_the_request():
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValueError):
+        c.projects.rebalance_cards("p1", [], column="doing")
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_rebalance_cards_rejects_more_than_the_server_cap():
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValueError):
+        c.projects.rebalance_cards("p1", ["c"] * 10_001, column="doing")
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_upload_background_sends_multipart():
+    responses.add(
+        responses.POST,
+        f"{BASE}/projects/p1/background-image",
+        json=_proj(),
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    c.projects.upload_background(
+        "p1", file=b"\x89PNG\r\n", filename="bg.png"
+    )
+    ct = responses.calls[0].request.headers["Content-Type"]
+    assert ct.startswith("multipart/form-data")
+
+
+@responses.activate
+def test_upload_background_rejects_a_non_image_type():
+    # The server sniffs the bytes too, but failing here saves a round trip
+    # and gives a clearer message than a bare 400.
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValueError, match="not one of"):
+        c.projects.upload_background("p1", file=b"hello", filename="notes.txt")
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_upload_background_rejects_over_10_mib():
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValueError, match="10 MiB"):
+        c.projects.upload_background(
+            "p1", file=b"x" * (10 * 1024 * 1024 + 1), filename="bg.png"
+        )
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_download_background_returns_bytes():
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/p1/background-image",
+        body=b"\x89PNG\r\n",
+        content_type="image/png",
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    assert c.projects.download_background("p1") == b"\x89PNG\r\n"
+
+
+@responses.activate
+def test_delete_background_returns_the_updated_project():
+    responses.add(
+        responses.DELETE,
+        f"{BASE}/projects/p1/background-image",
+        json=_proj(),
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    assert c.projects.delete_background("p1").id == "p1"
+
+
+@responses.activate
+def test_export_asks_for_json():
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/p1/export",
+        json={
+            "version": 1,
+            "exportedAt": "2026-05-08T10:00:00Z",
+            "project": {
+                "id": "p1",
+                "name": "Demo",
+                "isFavorite": False,
+                "createdAt": "2026-05-08T10:00:00Z",
+                "updatedAt": "2026-05-08T10:00:00Z",
+            },
+            "columns": [],
+            "cards": [],
+        },
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    c.projects.export("p1")
+    assert "format=json" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_export_csv_returns_raw_bytes():
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/p1/export",
+        body=b"id,title\n1,Hello\n",
+        content_type="text/csv",
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    out = c.projects.export_csv("p1")
+    assert out == b"id,title\n1,Hello\n"
+    assert "format=csv" in responses.calls[0].request.url
