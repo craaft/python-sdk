@@ -27,6 +27,18 @@ from craaft.resources._utils import (
 class CardsResource(BaseResource):
     """Endpoints under ``/cards`` (and ``/search``, since it returns cards)."""
 
+    def get(self, card_id: str) -> Card:
+        """Fetch a single card.
+
+        Returns the same shape :meth:`update` responds with, including
+        ``following``. A card that doesn't exist and a card on a board you
+        can't reach both raise
+        :class:`~craaft.exceptions.NotFoundError` - the API makes them
+        deliberately indistinguishable so membership can't be probed.
+        """
+        data = self._transport.request("GET", f"/cards/{id_seg(card_id)}")
+        return Card.from_api(data)
+
     def update(
         self,
         card_id: str,
@@ -131,6 +143,18 @@ class CardsResource(BaseResource):
             "GET", "/cards/hygiene", params={"type": type}
         )
         return [AttentionCard.from_api(c) for c in data]
+
+    def follow(self, card_id: str) -> None:
+        """Subscribe to notifications for a card.
+
+        Idempotent - following an already-followed card succeeds. The API
+        returns 204 with no body, so there is nothing to inspect.
+        """
+        self._transport.request("POST", f"/cards/{id_seg(card_id)}/follow")
+
+    def unfollow(self, card_id: str) -> None:
+        """Unsubscribe from a card's notifications. Idempotent, no body."""
+        self._transport.request("DELETE", f"/cards/{id_seg(card_id)}/follow")
 
     def list_events(self, card_id: str) -> _list[CardEvent]:
         data = self._transport.request("GET", f"/cards/{id_seg(card_id)}/events")

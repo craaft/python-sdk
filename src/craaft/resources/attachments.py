@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import mimetypes
 from builtins import list as _list
 from io import BytesIO
 from os import PathLike
-from pathlib import Path
 from typing import BinaryIO
 
 from craaft.models import Attachment
 from craaft.resources._base import BaseResource
-from craaft.resources._utils import id_seg
+from craaft.resources._utils import id_seg, resolve_upload
 
 # Server cap in internal/attachments/attachments.go
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -39,39 +37,19 @@ class AttachmentsResource(BaseResource):
         Accepts a filesystem path, bytes, or a binary file-like object.
         Requires the card's workspace to be on a paid plan (otherwise 402).
         """
-        if isinstance(file, (str, PathLike)):
-            path = Path(file)
-            name = filename or path.name
-            guessed, _ = mimetypes.guess_type(name)
-            ct = content_type or guessed or "application/octet-stream"
-            raw = path.read_bytes()
-            if len(raw) > _MAX_UPLOAD_BYTES:
-                raise ValueError("file exceeds the 25 MiB upload limit")
-            return self._upload_bytes(card_id, name, raw, ct)
-
-        if isinstance(file, bytes):
-            name = filename or "attachment"
-            guessed, _ = mimetypes.guess_type(name)
-            ct = content_type or guessed or "application/octet-stream"
-            if len(file) > _MAX_UPLOAD_BYTES:
-                raise ValueError("file exceeds the 25 MiB upload limit")
-            return self._upload_bytes(card_id, name, file, ct)
-
-        name = filename or getattr(file, "name", None) or "attachment"
-        if isinstance(name, PathLike):
-            name = Path(name).name
-        guessed, _ = mimetypes.guess_type(str(name))
-        ct = content_type or guessed or "application/octet-stream"
-        raw = file.read()
-        if len(raw) > _MAX_UPLOAD_BYTES:
-            raise ValueError("file exceeds the 25 MiB upload limit")
-        return self._upload_bytes(card_id, str(name), raw, ct)
+        name, raw, ct = resolve_upload(
+            file,
+            filename=filename,
+            content_type=content_type,
+            max_bytes=_MAX_UPLOAD_BYTES,
+            limit_label="25 MiB",
+            default_name="attachment",
+        )
+        return self._upload_bytes(card_id, name, raw, ct)
 
     def _upload_bytes(
         self, card_id: str, name: str, raw: bytes, content_type: str
     ) -> Attachment:
-        if not raw:
-            raise ValueError("cannot upload an empty file")
         data = self._transport.request(
             "POST",
             f"/cards/{id_seg(card_id)}/attachments",

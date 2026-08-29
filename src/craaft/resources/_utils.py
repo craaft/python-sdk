@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import mimetypes
 from datetime import date, datetime, timezone
-from typing import Any
+from os import PathLike
+from pathlib import Path
+from typing import Any, BinaryIO
 from urllib.parse import quote
 
 # Server-side cap on items per bulk request; mirrored client-side so an
@@ -22,6 +25,46 @@ def id_seg(value: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("resource ID must be a non-empty string")
     return quote(value, safe="")
+
+
+def resolve_upload(
+    file: str | PathLike[str] | BinaryIO | bytes,
+    *,
+    filename: str | None,
+    content_type: str | None,
+    max_bytes: int,
+    limit_label: str,
+    default_name: str,
+) -> tuple[str, bytes, str]:
+    """Normalize an upload argument into ``(name, bytes, content_type)``.
+
+    Accepts a filesystem path, raw bytes, or a binary file-like object, so
+    every upload endpoint takes the same shapes. The size check happens
+    here rather than server-side so an oversized file fails before it is
+    put on the wire. ``limit_label`` is the human-readable cap named in
+    the error (the caps differ per endpoint).
+    """
+    if isinstance(file, (str, PathLike)):
+        path = Path(file)
+        name = filename or path.name
+        raw = path.read_bytes()
+    elif isinstance(file, bytes):
+        name = filename or default_name
+        raw = file
+    else:
+        candidate = filename or getattr(file, "name", None) or default_name
+        if isinstance(candidate, PathLike):
+            candidate = Path(candidate).name
+        name = str(candidate)
+        raw = file.read()
+
+    if not raw:
+        raise ValueError("cannot upload an empty file")
+    if len(raw) > max_bytes:
+        raise ValueError(f"file exceeds the {limit_label} upload limit")
+
+    guessed, _ = mimetypes.guess_type(name)
+    return name, raw, content_type or guessed or "application/octet-stream"
 
 
 def serialize_dt(value: datetime | str | None) -> str | None:

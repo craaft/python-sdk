@@ -120,6 +120,9 @@ class Card:
     tags: list[str]
     created_at: datetime
     updated_at: datetime
+    # Whether the authenticated caller follows this card. Scoped to the
+    # token's user, so it differs per caller for the same card.
+    following: bool = False
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> Card:
@@ -147,6 +150,7 @@ class Card:
             tags=tags,
             created_at=_parse_dt(data["createdAt"]),
             updated_at=_parse_dt(data["updatedAt"]),
+            following=bool(data.get("following", False)),
         )
 
 
@@ -682,4 +686,102 @@ class ProjectExport:
             project=ProjectExportProject.from_api(data["project"]),
             columns=[ProjectExportColumn.from_api(c) for c in data.get("columns", [])],
             cards=[ProjectExportCard.from_api(c) for c in data.get("cards", [])],
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PublicBoardProject:
+    """The project half of a public share snapshot.
+
+    Deliberately thinner than :class:`Project` - the public endpoint omits
+    workspace, ownership and membership fields.
+    """
+
+    id: str
+    name: str
+    updated_at: datetime
+    description: str | None = None
+    background_image: str | None = None
+    background_color: str | None = None
+    color_scheme: str | None = None
+    text_color: TextColor | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> PublicBoardProject:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            updated_at=_parse_dt(data["updatedAt"]),
+            description=data.get("description"),
+            background_image=data.get("backgroundImage") or None,
+            background_color=data.get("backgroundColor") or None,
+            color_scheme=data.get("colorScheme") or None,
+            text_color=data.get("textColor") or None,
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PublicBoardColumn:
+    key: str
+    title: str
+    position: float
+    color: str | None = None
+    is_done: bool = False
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> PublicBoardColumn:
+        return cls(
+            key=data["key"],
+            title=data["title"],
+            position=float(data["position"]),
+            color=data.get("color") or None,
+            is_done=bool(data.get("isDone", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PublicBoardCard:
+    """A card as it appears on a public board.
+
+    Carries no due date, size, tags, checklist or attachment counts - the
+    public projection stops at priority and assignee.
+    """
+
+    id: str
+    column: str
+    position: float
+    title: str
+    description: str | None = None
+    priority: Priority | None = None
+    assigned_user_id: str | None = None
+    assigned_user_name: str | None = None
+    assigned_user_avatar_url: str | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> PublicBoardCard:
+        return cls(
+            id=data["id"],
+            column=data["column"],
+            position=float(data["position"]),
+            title=data["title"],
+            description=data.get("description"),
+            priority=data.get("priority"),
+            assigned_user_id=data.get("assignedUserId"),
+            assigned_user_name=data.get("assignedUserName"),
+            assigned_user_avatar_url=data.get("assignedUserAvatarUrl") or None,
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PublicBoard:
+    project: PublicBoardProject
+    columns: list[PublicBoardColumn]
+    cards: list[PublicBoardCard]
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> PublicBoard:
+        return cls(
+            project=PublicBoardProject.from_api(data["project"]),
+            columns=[PublicBoardColumn.from_api(c) for c in data.get("columns", [])],
+            cards=[PublicBoardCard.from_api(c) for c in data.get("cards", [])],
         )
