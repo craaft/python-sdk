@@ -35,7 +35,7 @@ BoardRole = Literal["admin", "contributor"]
 Visibility = Literal["private", "workspace"]
 BoardMemberSource = Literal["explicit", "workspace-admin", "workspace-visible"]
 HygieneType = Literal["ghosts", "stuck", "mine_no_date"]
-CardEventType = Literal["moved", "priority", "assignee"]
+CardEventType = Literal["moved", "moved_board", "priority", "assignee"]
 WebhookFormat = Literal["craaft", "slack", "discord"]
 DeliveryStatus = Literal["delivered", "failed"]
 
@@ -369,6 +369,11 @@ class CardEvent:
     to_name: str | None = None
     actor_id: str | None = None
     actor_name: str | None = None
+    # moved_board only: the source / target column titles. For moved_board,
+    # from_name / to_name are board names. Both are None for a board you
+    # can't see.
+    from_detail: str | None = None
+    to_detail: str | None = None
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> CardEvent:
@@ -382,6 +387,8 @@ class CardEvent:
             to_name=data.get("toName"),
             actor_id=data.get("actorId"),
             actor_name=data.get("actorName"),
+            from_detail=data.get("fromDetail"),
+            to_detail=data.get("toDetail"),
         )
 
 

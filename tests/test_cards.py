@@ -592,3 +592,37 @@ def test_detail_fetches_the_card_with_its_collections():
     assert d.checklist[0].text == "t"
     assert d.attachments == []
     assert responses.calls[0].request.method == "GET"
+
+
+@responses.activate
+def test_list_events_parses_a_board_move():
+    responses.add(
+        responses.GET,
+        f"{BASE}/cards/card1/events",
+        json=[
+            {
+                "id": "ev1",
+                "type": "moved_board",
+                "fromValue": "p1:todo",
+                "toValue": "p2:done",
+                "fromName": "Product Launch",
+                "toName": "Website Redesign",
+                "fromDetail": "To Do",
+                "toDetail": "Done",
+                "createdAt": "2026-09-28T10:00:00Z",
+            },
+            # A board the caller can't see comes back without names.
+            {
+                "id": "ev2",
+                "type": "moved_board",
+                "fromValue": "p9:todo",
+                "toValue": "p2:todo",
+                "createdAt": "2026-09-28T11:00:00Z",
+            },
+        ],
+    )
+    events = CraaftClient(api_key="cra_x").cards.list_events("card1")
+    assert events[0].type == "moved_board"
+    assert (events[0].from_name, events[0].from_detail) == ("Product Launch", "To Do")
+    assert (events[0].to_name, events[0].to_detail) == ("Website Redesign", "Done")
+    assert events[1].from_name is None and events[1].from_detail is None
