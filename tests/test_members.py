@@ -28,6 +28,8 @@ def test_list_members():
 
 @responses.activate
 def test_create_invitation_with_board_grants():
+    # A bare invitation object (no {invitation, consumed} wrapper) must
+    # still parse - the client tolerates both shapes.
     payload = {
         "id": "inv1",
         "email": "new@b.co",
@@ -46,8 +48,56 @@ def test_create_invitation_with_board_grants():
         board_grants=[("p1", "contributor")],
     )
     assert inv.email == "new@b.co"
+    assert inv.consumed is False
     body = json.loads(responses.calls[0].request.body)
     assert body["boardGrants"] == [{"projectId": "p1", "role": "contributor"}]
+
+
+@responses.activate
+def test_create_invitation_unwraps_the_response_envelope():
+    # The real API wraps the invitation as {invitation, consumed} - a
+    # pre-existing bug parsed this wrapper directly as an Invitation and
+    # produced empty fields. Verify it unwraps correctly.
+    payload = {
+        "invitation": {
+            "id": "inv1",
+            "email": "new@b.co",
+            "role": "member",
+            "invitedBy": "u1",
+            "invitedByName": "Alice",
+            "createdAt": "2026-05-08T10:00:00Z",
+            "expiresAt": "2026-06-08T10:00:00Z",
+            "boardGrants": [],
+        },
+        "consumed": True,
+    }
+    responses.add(responses.POST, f"{BASE}/invitations", json=payload, status=201)
+    c = CraaftClient(api_key="cra_x")
+    inv = c.members.create_invitation(email="new@b.co", role="member")
+    assert inv.id == "inv1"
+    assert inv.email == "new@b.co"
+    assert inv.consumed is True
+
+
+@responses.activate
+def test_create_invitation_wrapper_defaults_consumed_false():
+    payload = {
+        "invitation": {
+            "id": "inv1",
+            "email": "new@b.co",
+            "role": "member",
+            "invitedBy": "u1",
+            "invitedByName": "Alice",
+            "createdAt": "2026-05-08T10:00:00Z",
+            "expiresAt": "2026-06-08T10:00:00Z",
+            "boardGrants": [],
+        },
+        "consumed": False,
+    }
+    responses.add(responses.POST, f"{BASE}/invitations", json=payload, status=201)
+    c = CraaftClient(api_key="cra_x")
+    inv = c.members.create_invitation(email="new@b.co", role="member")
+    assert inv.consumed is False
 
 
 @responses.activate

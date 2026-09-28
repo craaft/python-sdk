@@ -128,7 +128,66 @@ def test_delete():
 
 
 @responses.activate
+def test_archive_posts_and_returns_none():
+    responses.add(
+        responses.POST,
+        f"{BASE}/cards/card1/archive",
+        json={"archived": True, "id": "card1"},
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    assert c.cards.archive("card1") is None
+    assert responses.calls[0].request.method == "POST"
+
+
+@responses.activate
+def test_archive_already_archived_raises_not_found():
+    from craaft.exceptions import NotFoundError
+
+    responses.add(
+        responses.POST,
+        f"{BASE}/cards/card1/archive",
+        json={"error": "card not found"},
+        status=404,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(NotFoundError):
+        c.cards.archive("card1")
+
+
+@responses.activate
+def test_restore_returns_the_full_card():
+    responses.add(
+        responses.POST,
+        f"{BASE}/cards/card1/restore",
+        json=_card({"title": "Back on the board"}),
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    card = c.cards.restore("card1")
+    assert card.title == "Back on the board"
+    assert responses.calls[0].request.method == "POST"
+
+
+@responses.activate
+def test_restore_not_archived_raises_not_found():
+    from craaft.exceptions import NotFoundError
+
+    responses.add(
+        responses.POST,
+        f"{BASE}/cards/card1/restore",
+        json={"error": "card not archived"},
+        status=404,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(NotFoundError):
+        c.cards.restore("card1")
+
+
+@responses.activate
 def test_upcoming():
+    from craaft.models import UpcomingCard
+
     payload = [
         _summary(
             {
@@ -141,20 +200,76 @@ def test_upcoming():
     responses.add(responses.GET, f"{BASE}/cards/upcoming", json=payload, status=200)
     c = CraaftClient(api_key="cra_x")
     cards = c.cards.upcoming()
+    assert isinstance(cards[0], UpcomingCard)
     assert cards[0].project_name == "Demo"
     assert cards[0].column_title == "To Do"
     assert cards[0].column_key == "todo"
     assert cards[0].priority == "high"
     assert cards[0].due_date is not None
+    # Deprecated fields the upcoming endpoint never sends: present, but
+    # always their default rather than raising AttributeError.
+    assert cards[0].description is None
+    assert cards[0].updated_at is None
+    assert cards[0].archived is False
+
+
+@responses.activate
+def test_upcoming_assignee_fields_omitted_when_unset():
+    from craaft.models import UpcomingCard
+
+    payload = [_summary({"dueDate": "2026-05-05T00:00:00+02:00"})]
+    responses.add(responses.GET, f"{BASE}/cards/upcoming", json=payload, status=200)
+    c = CraaftClient(api_key="cra_x")
+    cards = c.cards.upcoming()
+    assert isinstance(cards[0], UpcomingCard)
+    assert cards[0].assigned_user_id is None
+    assert cards[0].priority is None
+
+
+@responses.activate
+def test_focus_due_bucket_uses_upcoming_card_shape():
+    from craaft.models import UpcomingCard
+
+    responses.add(
+        responses.GET,
+        f"{BASE}/cards/focus",
+        json={
+            "due": [_summary({"dueDate": "2026-05-05T00:00:00+02:00", "priority": "high"})],
+            "attention": [],
+            "hygiene": {"ghosts": 0, "longInProgress": 0, "mineNoDate": 0},
+        },
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    focus = c.cards.focus()
+    assert isinstance(focus.due[0], UpcomingCard)
+    assert focus.due[0].priority == "high"
+    assert focus.attention == []
+    assert focus.hygiene.ghosts == 0
 
 
 @responses.activate
 def test_search_default_limit():
-    responses.add(responses.GET, f"{BASE}/search", json={"cards": [_summary()]}, status=200)
+    from craaft.models import SearchResult
+
+    responses.add(
+        responses.GET,
+        f"{BASE}/search",
+        json={"cards": [_summary({"description": "snippet", "archived": True})]},
+        status=200,
+    )
     c = CraaftClient(api_key="cra_x")
     cards = c.cards.search(q="hello")
     assert len(cards) == 1
+    assert isinstance(cards[0], SearchResult)
     assert cards[0].column_key == "todo"
+    assert cards[0].description == "snippet"
+    assert cards[0].archived is True
+    # Deprecated fields the search endpoint never sends: present, but
+    # always their default rather than raising AttributeError.
+    assert cards[0].due_date is None
+    assert cards[0].assigned_user_id is None
+    assert cards[0].priority is None
     qs = responses.calls[0].request.url
     assert "q=hello" in qs
     assert "limit=20" in qs
@@ -427,3 +542,53 @@ def test_follow_and_unfollow_send_204_shaped_calls():
     assert c.cards.unfollow("card1") is None
     assert responses.calls[0].request.method == "POST"
     assert responses.calls[1].request.method == "DELETE"
+
+
+@responses.activate
+def test_detail_fetches_the_card_with_its_collections():
+    responses.add(
+        responses.GET,
+        f"{BASE}/cards/card1/detail",
+        json={
+            "card": _card({"title": "Detailed"}),
+            "comments": [
+                {
+                    "id": "cm1",
+                    "cardId": "card1",
+                    "authorId": "u1",
+                    "body": "hi",
+                    "createdAt": "2026-05-08T10:00:00Z",
+                }
+            ],
+            "events": [
+                {
+                    "id": "ev1",
+                    "type": "moved",
+                    "fromValue": "todo",
+                    "toValue": "doing",
+                    "createdAt": "2026-05-08T10:00:00Z",
+                }
+            ],
+            "checklist": [
+                {
+                    "id": "ck1",
+                    "cardId": "card1",
+                    "text": "t",
+                    "done": False,
+                    "position": 1.0,
+                    "createdAt": "2026-05-08T10:00:00Z",
+                    "updatedAt": "2026-05-08T10:00:00Z",
+                }
+            ],
+            "attachments": [],
+        },
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    d = c.cards.detail("card1")
+    assert d.card.title == "Detailed"
+    assert [x.body for x in d.comments] == ["hi"]
+    assert d.events[0].to_value == "doing"
+    assert d.checklist[0].text == "t"
+    assert d.attachments == []
+    assert responses.calls[0].request.method == "GET"

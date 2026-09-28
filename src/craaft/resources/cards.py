@@ -7,13 +7,15 @@ from typing import Any
 from craaft.models import (
     AttentionCard,
     Card,
+    CardDetail,
     CardEvent,
-    CardSummary,
     ChecklistItem,
     Comment,
     FocusResponse,
     HygieneType,
     Priority,
+    SearchResult,
+    UpcomingCard,
 )
 from craaft.resources._base import BaseResource
 from craaft.resources._utils import (
@@ -38,6 +40,17 @@ class CardsResource(BaseResource):
         """
         data = self._transport.request("GET", f"/cards/{id_seg(card_id)}")
         return Card.from_api(data)
+
+    def detail(self, card_id: str) -> CardDetail:
+        """Fetch a card with its comments, events, checklist and attachments.
+
+        One round-trip to ``GET /cards/{id}/detail``, what the web app loads
+        when a card modal opens. Prefer it over :meth:`get` plus four list
+        calls when rendering a card view. Missing and inaccessible cards
+        both raise :class:`~craaft.exceptions.NotFoundError`.
+        """
+        data = self._transport.request("GET", f"/cards/{id_seg(card_id)}/detail")
+        return CardDetail.from_api(data)
 
     def update(
         self,
@@ -120,6 +133,27 @@ class CardsResource(BaseResource):
     def delete(self, card_id: str) -> None:
         self._transport.request("DELETE", f"/cards/{id_seg(card_id)}")
 
+    def archive(self, card_id: str) -> None:
+        """Take a card off its board without deleting it.
+
+        The card stays searchable and appears under
+        :meth:`~craaft.resources.projects.ProjectsResource.list_archived_cards`
+        until restored. Archiving an already-archived card raises
+        :class:`~craaft.exceptions.NotFoundError`, same as a missing card or
+        one on a board you can't reach.
+        """
+        self._transport.request("POST", f"/cards/{id_seg(card_id)}/archive")
+
+    def restore(self, card_id: str) -> Card:
+        """Put an archived card back on its board.
+
+        It returns to the column and position it was archived from.
+        Restoring a card that isn't archived raises
+        :class:`~craaft.exceptions.NotFoundError`.
+        """
+        data = self._transport.request("POST", f"/cards/{id_seg(card_id)}/restore")
+        return Card.from_api(data)
+
     def move(
         self, card_id: str, *, target_project_id: str, column: str
     ) -> Card:
@@ -130,9 +164,10 @@ class CardsResource(BaseResource):
         )
         return Card.from_api(data)
 
-    def upcoming(self) -> _list[CardSummary]:
+    def upcoming(self) -> _list[UpcomingCard]:
+        """Every due-dated card you can see, ordered by due date ascending."""
         data = self._transport.request("GET", "/cards/upcoming")
-        return [CardSummary.from_api(c) for c in data]
+        return [UpcomingCard.from_api(c) for c in data]
 
     def focus(self) -> FocusResponse:
         data = self._transport.request("GET", "/cards/focus")
@@ -160,11 +195,20 @@ class CardsResource(BaseResource):
         data = self._transport.request("GET", f"/cards/{id_seg(card_id)}/events")
         return [CardEvent.from_api(e) for e in data]
 
-    def search(self, *, q: str, limit: int = 20) -> _list[CardSummary]:
+    def search(self, *, q: str, limit: int = 20) -> _list[SearchResult]:
+        """Cross-project card search, scoped to boards you can reach.
+
+        ``limit`` must be between 1 and 50 inclusive - this client fails
+        fast with a :class:`ValueError` rather than send a value the server
+        would silently reinterpret. (For reference, the server itself
+        defaults a missing or non-positive ``limit`` to 20 and clamps
+        anything above 50 down to 50, so a request that somehow bypassed
+        this check would never actually error server-side.)
+        """
         if not 1 <= limit <= 50:
             raise ValueError("limit must be between 1 and 50")
         data = self._transport.request("GET", "/search", params={"q": q, "limit": limit})
-        return [CardSummary.from_api(c) for c in data.get("cards", [])]
+        return [SearchResult.from_api(c) for c in data.get("cards", [])]
 
     def list_comments(self, card_id: str) -> _list[Comment]:
         data = self._transport.request("GET", f"/cards/{id_seg(card_id)}/comments")

@@ -36,6 +36,8 @@ Visibility = Literal["private", "workspace"]
 BoardMemberSource = Literal["explicit", "workspace-admin", "workspace-visible"]
 HygieneType = Literal["ghosts", "stuck", "mine_no_date"]
 CardEventType = Literal["moved", "priority", "assignee"]
+WebhookFormat = Literal["craaft", "slack", "discord"]
+DeliveryStatus = Literal["delivered", "failed"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -123,6 +125,9 @@ class Card:
     # Whether the authenticated caller follows this card. Scoped to the
     # token's user, so it differs per caller for the same card.
     following: bool = False
+    # Set only by GET /projects/{id}/cards/archived - when the card was
+    # archived. None everywhere else, including a live card.
+    archived_at: datetime | None = None
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> Card:
@@ -151,12 +156,23 @@ class Card:
             created_at=_parse_dt(data["createdAt"]),
             updated_at=_parse_dt(data["updatedAt"]),
             following=bool(data.get("following", False)),
+            archived_at=_parse_dt_optional(data.get("archivedAt")),
         )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CardSummary:
-    """Lightweight card preview returned by ``/cards/upcoming`` and ``/search``."""
+    """Deprecated. Kept only for backward compatibility.
+
+    This used to be the return type of both ``cards.search()`` and
+    ``cards.upcoming()``, but that was a bug: the two endpoints return
+    different shapes, and this type merged them, so half its fields were
+    always empty depending on which call produced it. It has been split into
+    :class:`SearchResult` (what ``search()`` returns) and
+    :class:`UpcomingCard` (what ``upcoming()`` and ``FocusResponse.due``
+    return). This class is no longer produced by the client and will be
+    removed in a future major version - prefer the two replacements.
+    """
 
     id: str
     project_id: str
@@ -188,6 +204,92 @@ class CardSummary:
             priority=data.get("priority"),
             updated_at=_parse_dt_optional(data.get("updatedAt")),
             archived=bool(data.get("archived", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SearchResult:
+    """One ``GET /search`` hit (the ``cards`` array).
+
+    Carries no due date, assignee or priority - the search handler never
+    sends them. Those fields are kept below as deprecated, always-default
+    attributes (rather than removed outright) so code written against the
+    old, merged :class:`CardSummary` return type doesn't raise
+    ``AttributeError``; they will be dropped in a future major version.
+    """
+
+    id: str
+    project_id: str
+    project_name: str
+    column_key: str
+    column_title: str
+    title: str
+    description: str | None = None
+    updated_at: datetime | None = None
+    archived: bool = False
+    # Deprecated: GET /search never populates these. See UpcomingCard.
+    due_date: datetime | None = None
+    assigned_user_id: str | None = None
+    assigned_user_name: str | None = None
+    priority: Priority | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> SearchResult:
+        return cls(
+            id=data["id"],
+            project_id=data["projectId"],
+            project_name=data.get("projectName", ""),
+            column_key=data.get("columnKey", data.get("column", "")),
+            column_title=data.get("columnTitle", ""),
+            title=data["title"],
+            description=data.get("description"),
+            updated_at=_parse_dt_optional(data.get("updatedAt")),
+            archived=bool(data.get("archived", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UpcomingCard:
+    """One ``GET /cards/upcoming`` row - also what ``FocusResponse.due``
+    carries, since the server builds both from the identical shape.
+
+    ``assigned_user_id``, ``assigned_user_name`` and ``priority`` are
+    omitted (not null) by the server when unset; this parses either way.
+    ``description``, ``updated_at`` and ``archived`` are kept below as
+    deprecated, always-default attributes (rather than removed outright) so
+    code written against the old, merged :class:`CardSummary` return type
+    doesn't raise ``AttributeError``; they will be dropped in a future major
+    version.
+    """
+
+    id: str
+    project_id: str
+    project_name: str
+    column_key: str
+    column_title: str
+    title: str
+    due_date: datetime | None = None
+    assigned_user_id: str | None = None
+    assigned_user_name: str | None = None
+    priority: Priority | None = None
+    # Deprecated: GET /cards/upcoming and FocusResponse.due never populate these.
+    description: str | None = None
+    updated_at: datetime | None = None
+    archived: bool = False
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> UpcomingCard:
+        return cls(
+            id=data["id"],
+            project_id=data["projectId"],
+            project_name=data.get("projectName", ""),
+            column_key=data.get("columnKey", data.get("column", "")),
+            column_title=data.get("columnTitle", ""),
+            title=data["title"],
+            due_date=_parse_dt_optional(data.get("dueDate")),
+            assigned_user_id=data.get("assignedUserId") or data.get("assigneeId"),
+            assigned_user_name=data.get("assignedUserName"),
+            priority=data.get("priority"),
         )
 
 
@@ -243,14 +345,14 @@ class HygieneCounts:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FocusResponse:
-    due: list[CardSummary]
+    due: list[UpcomingCard]
     attention: list[AttentionCard]
     hygiene: HygieneCounts
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> FocusResponse:
         return cls(
-            due=[CardSummary.from_api(c) for c in data.get("due", [])],
+            due=[UpcomingCard.from_api(c) for c in data.get("due", [])],
             attention=[AttentionCard.from_api(c) for c in data.get("attention", [])],
             hygiene=HygieneCounts.from_api(data.get("hygiene", {})),
         )
@@ -535,6 +637,12 @@ class Invitation:
     created_at: datetime
     expires_at: datetime
     board_grants: list[InvitationGrant]
+    # Only meaningful on the POST /invitations response, where the API wraps
+    # the invitation as {invitation, consumed}: True means the invitee already
+    # had a verified account and was added to the workspace immediately,
+    # rather than left as a pending invite. False (the default) everywhere
+    # else, including GET /invitations list results.
+    consumed: bool = False
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> Invitation:
@@ -547,6 +655,7 @@ class Invitation:
             created_at=_parse_dt(data["createdAt"]),
             expires_at=_parse_dt(data["expiresAt"]),
             board_grants=[InvitationGrant.from_api(g) for g in data.get("boardGrants", [])],
+            consumed=bool(data.get("consumed", False)),
         )
 
 
@@ -784,4 +893,209 @@ class PublicBoard:
             project=PublicBoardProject.from_api(data["project"]),
             columns=[PublicBoardColumn.from_api(c) for c in data.get("columns", [])],
             cards=[PublicBoardCard.from_api(c) for c in data.get("cards", [])],
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CardDetail:
+    """One authorised envelope for a card view (``GET /cards/{id}/detail``).
+
+    The card plus its comments, activity events, checklist and attachments,
+    so opening a card costs one round-trip instead of five.
+    """
+
+    card: Card
+    comments: list[Comment]
+    events: list[CardEvent]
+    checklist: list[ChecklistItem]
+    attachments: list[Attachment]
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> CardDetail:
+        return cls(
+            card=Card.from_api(data["card"]),
+            comments=[Comment.from_api(c) for c in data.get("comments") or []],
+            events=[CardEvent.from_api(e) for e in data.get("events") or []],
+            checklist=[ChecklistItem.from_api(i) for i in data.get("checklist") or []],
+            attachments=[Attachment.from_api(a) for a in data.get("attachments") or []],
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BoardTemplateColumn:
+    """One column a :class:`BoardTemplate` seeds."""
+
+    title: str
+    color: str
+    is_done: bool
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> BoardTemplateColumn:
+        return cls(
+            title=data["title"],
+            color=data.get("color", ""),
+            is_done=bool(data.get("isDone", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BoardTemplate:
+    """A named column layout from ``GET /board-templates``.
+
+    Pass ``key`` as ``template=`` to :meth:`~craaft.resources.projects.ProjectsResource.create`
+    to seed a new board with these columns instead of the default Kanban layout.
+    """
+
+    key: str
+    name: str
+    description: str
+    columns: list[BoardTemplateColumn]
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> BoardTemplate:
+        return cls(
+            key=data["key"],
+            name=data["name"],
+            description=data["description"],
+            columns=[BoardTemplateColumn.from_api(c) for c in data.get("columns") or []],
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ColumnArchiveResult:
+    """Result of archiving a column's live cards (``POST /columns/{id}/archive``)."""
+
+    archived: int
+    ids: list[str]
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> ColumnArchiveResult:
+        return cls(
+            archived=int(data.get("archived", 0)),
+            ids=[str(i) for i in data.get("ids") or []],
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WebhookDelivery:
+    """One outbound-webhook delivery attempt, newest first.
+
+    ``status`` is ``"delivered"`` or ``"failed"``. ``error`` is always a
+    plain string, never ``None`` - the server sends ``""`` on a successful
+    delivery.
+    """
+
+    event: str
+    status: DeliveryStatus
+    status_code: int
+    attempts: int
+    error: str
+    created_at: datetime
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> WebhookDelivery:
+        return cls(
+            event=data["event"],
+            status=data["status"],
+            status_code=int(data.get("statusCode", 0)),
+            attempts=int(data.get("attempts", 0)),
+            error=data.get("error") or "",
+            created_at=_parse_dt(data["createdAt"]),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WebhookSubscription:
+    """A board's outbound webhook subscription.
+
+    ``secret`` is the HMAC signing secret for ``craaft``-format deliveries
+    (``X-Craaft-Signature``); it is returned on every read, not just creation.
+    Slack and Discord deliveries are unsigned and ignore it.
+    """
+
+    id: str
+    endpoint_id: str
+    url: str
+    secret: str
+    description: str
+    format: WebhookFormat
+    events: list[str]
+    active: bool
+    created_at: datetime
+    recent_deliveries: list[WebhookDelivery] = field(default_factory=list)
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> WebhookSubscription:
+        return cls(
+            id=data["id"],
+            endpoint_id=data["endpointId"],
+            url=data["url"],
+            secret=data["secret"],
+            description=data.get("description", ""),
+            format=data.get("format", "craaft"),
+            events=list(data.get("events") or []),
+            active=bool(data.get("active", False)),
+            created_at=_parse_dt(data["createdAt"]),
+            recent_deliveries=[
+                WebhookDelivery.from_api(d) for d in data.get("recentDeliveries") or []
+            ],
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BoardWebhooks:
+    """Response of ``GET /projects/{id}/webhooks``: subscriptions plus the
+    catalogue of broadcast event names available to filter on."""
+
+    webhooks: list[WebhookSubscription]
+    event_catalogue: list[str]
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> BoardWebhooks:
+        return cls(
+            webhooks=[WebhookSubscription.from_api(w) for w in data.get("webhooks") or []],
+            event_catalogue=list(data.get("eventCatalogue") or []),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboundEmailAddress:
+    """A board's email-to-card intake address."""
+
+    email: str
+    token: str
+    target_column: str | None
+    active: bool
+    created_at: datetime
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> InboundEmailAddress:
+        return cls(
+            email=data["email"],
+            token=data["token"],
+            target_column=data.get("targetColumn"),
+            active=bool(data.get("active", False)),
+            created_at=_parse_dt(data["createdAt"]),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InboundEmailStatus:
+    """Response of ``GET /projects/{id}/inbound-email``.
+
+    ``address`` is ``None`` when the board has never enabled inbound email
+    (``enabled=False``); use
+    :meth:`~craaft.resources.inbound_email.InboundEmailResource.enable` to
+    set it up.
+    """
+
+    enabled: bool
+    address: InboundEmailAddress | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> InboundEmailStatus:
+        addr_raw = data.get("address")
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            address=InboundEmailAddress.from_api(addr_raw) if addr_raw else None,
         )

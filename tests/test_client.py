@@ -81,6 +81,13 @@ def test_resource_sub_clients_present():
     assert c.cards is not None
     assert c.comments is not None
     assert c.columns is not None
+    assert c.attachments is not None
+    assert c.members is not None
+    assert c.checklist is not None
+    assert c.milestones is not None
+    assert c.public is not None
+    assert c.webhooks is not None
+    assert c.inbound_email is not None
 
 
 def test_context_manager_closes():

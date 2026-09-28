@@ -60,7 +60,7 @@ with CraaftClient() as client:
 
     client.cards.add_comment(card.id, body="lgtm")
 
-    # upcoming() and search() return CardSummary previews, not full cards.
+    # upcoming() returns lightweight UpcomingCard previews, not full cards.
     for summary in client.cards.upcoming():
         print(summary.title, summary.due_date, summary.project_name)
 ```
@@ -75,7 +75,7 @@ The [`examples/`](examples/) directory has runnable scripts for the most common 
 | [`card_lifecycle.py`](examples/card_lifecycle.py) | Create, set priority and due date via PATCH, comment, move between columns, delete. |
 | [`error_handling.py`](examples/error_handling.py) | Which exceptions to catch and what fields they carry. |
 | [`retries.py`](examples/retries.py) | Tuning `RetryConfig` and reacting to `RateLimitError` yourself. |
-| [`searching.py`](examples/searching.py) | `cards.search()` and `cards.upcoming()`, both returning `CardSummary`. |
+| [`searching.py`](examples/searching.py) | `cards.search()` (`SearchResult`) and `cards.upcoming()` (`UpcomingCard`). |
 | [`advanced_client.py`](examples/advanced_client.py) | Custom session, alternate base URL, user-agent, debug logging. |
 
 Set `CRAAFT_API_TOKEN` (and optionally `CRAAFT_BASE_URL`) in your environment, then `python examples/quickstart.py`.
@@ -99,17 +99,19 @@ client = CraaftClient(
 | Sub-client          | Methods |
 |---------------------|---------|
 | `client.me`         | `get()`, `update(name=, email=, username=)` |
-| `client.projects`   | `list()`, `get(id)`, `create(...)`, `update(id, ...)`, `delete(id)`, `export(id)`, `export_csv(id)`, `list_tags(id)`, `enable_share(id)`, `disable_share(id)`, `list_cards(id)`, `create_card(id, ...)`, `bulk_create_cards(id, cards)`, `rebalance_cards(id, ids, column=)`, `upload_background(id, file=)`, `download_background(id)`, `delete_background(id)`, `list_milestones(id)`, `add_milestone(id, name=, due_on=)`, `add_column(id, title=)`, `list_members(id)`, `add_member(id, ...)`, `update_member(id, ...)`, `remove_member(id, ...)` |
-| `client.cards`      | `get(id)`, `update(id, ...)`, `bulk_update(cards)`, `bulk_move(ids, column=, target_project_id=)`, `delete(id)`, `move(id, ...)`, `follow(id)`, `unfollow(id)`, `upcoming()`, `focus()`, `hygiene(type=)`, `list_events(id)`, `search(q=, limit=20)`, `list_comments(id)`, `add_comment(id, body=)`, `list_checklist(id)`, `add_checklist_item(id, text=)` |
+| `client.projects`   | `list()`, `get(id)`, `create(..., template=)`, `update(id, ...)`, `delete(id)`, `list_templates()`, `export(id)`, `export_csv(id)`, `list_tags(id)`, `enable_share(id)`, `disable_share(id)`, `list_cards(id)`, `list_archived_cards(id)`, `create_card(id, ...)`, `bulk_create_cards(id, cards)`, `rebalance_cards(id, ids, column=)`, `upload_background(id, file=)`, `download_background(id)`, `delete_background(id)`, `list_milestones(id)`, `add_milestone(id, name=, due_on=)`, `add_column(id, title=)`, `list_members(id)`, `add_member(id, ...)`, `update_member(id, ...)`, `remove_member(id, ...)` |
+| `client.cards`      | `get(id)`, `detail(id)`, `update(id, ...)`, `bulk_update(cards)`, `bulk_move(ids, column=, target_project_id=)`, `delete(id)`, `archive(id)`, `restore(id)`, `move(id, ...)`, `follow(id)`, `unfollow(id)`, `upcoming()`, `focus()`, `hygiene(type=)`, `list_events(id)`, `search(q=, limit=20)`, `list_comments(id)`, `add_comment(id, body=)`, `list_checklist(id)`, `add_checklist_item(id, text=)` |
 | `client.attachments`| `list_for_card(card_id)`, `upload(card_id, file=, filename=, content_type=)`, `download(attachment_id)`, `delete(attachment_id)` |
 | `client.comments`   | `update(id, body=)`, `delete(id)` |
 | `client.checklist`  | `update(id, text=, done=)`, `delete(id)` |
-| `client.columns`    | `update(id, ...)`, `delete(id)`, `archive(id)` |
+| `client.columns`    | `update(id, ...)`, `delete(id)`, `archive(id)`, `archive_with_ids(id)` |
 | `client.milestones` | `update(id, name=, due_on=, achieved=)`, `delete(id)` |
 | `client.members`    | `list()`, `update_role(user_id, role=)`, `remove(user_id)`, `list_invitations()`, `create_invitation(...)`, `revoke_invitation(id)` |
+| `client.webhooks`   | `list_for_project(project_id)`, `create(project_id, url=, ...)`, `update(id, ...)`, `delete(id)` |
+| `client.inbound_email` | `get(project_id)`, `enable(project_id, target_column=)`, `update(project_id, ...)`, `disable(project_id)` |
 | `client.public`     | `board(token)`, `board_background(token)`, `avatar(user_id)` - no auth required |
 
-`upcoming()` and `search()` return `list[CardSummary]` - lightweight previews. `focus()` returns a `FocusResponse` with `due`, `attention`, and `hygiene` buckets. `client.version()` returns the server's build info and needs no auth, which makes it a cheap liveness probe.
+`search()` returns `list[SearchResult]` and `upcoming()` returns `list[UpcomingCard]` - lightweight, endpoint-specific previews (see [Models](#models)). `focus()` returns a `FocusResponse` with `due` (`list[UpcomingCard]`), `attention`, and `hygiene` buckets. `client.version()` returns the server's build info and needs no auth, which makes it a cheap liveness probe.
 
 The one endpoint the SDK deliberately does not wrap is `GET /projects/{id}/events`. That is the realtime SSE stream, not an activity log: it opens a `text/event-stream` that never completes, so a request/response client would simply hang on it. Per-card history is `cards.list_events(id)`, which is ordinary JSON.
 
@@ -117,6 +119,7 @@ The one endpoint the SDK deliberately does not wrap is `GET /projects/{id}/event
 
 ```python
 card = client.cards.get(card_id)      # single fetch, no board scan
+detail = client.cards.detail(card_id)  # card + comments + events + checklist + attachments, one call
 if not card.following:
     client.cards.follow(card_id)      # idempotent, returns None
 
@@ -124,6 +127,36 @@ if not card.following:
 # neighbours. Request order becomes positions 1, 2, 3, ...
 client.projects.rebalance_cards(project.id, ordered_ids, column="doing")
 ```
+
+### Board templates
+
+```python
+for template in client.projects.list_templates():
+    print(template.key, template.name, len(template.columns))
+
+# Seed the new board with the "sprint" template's columns instead of the
+# default Kanban three. Omit template= (or pass "") for the default.
+project = client.projects.create(name="Q3 Sprint", template="sprint")
+```
+
+An unrecognised `template` key raises `ValidationError` (400). The create response doesn't include the board's columns; call `client.projects.get()` on the new id to read their keys (only the default template uses `todo` / `doing` / `done`).
+
+### Archiving cards
+
+```python
+client.cards.archive(card.id)              # off the board, still searchable
+archived = client.projects.list_archived_cards(project.id)
+client.cards.restore(archived[0].id)       # back to its original column + position
+
+# Bulk-archive every live card in a done column.
+count = client.columns.archive(done_column.id)
+
+# Same, but also returning the archived card ids so you can offer an undo.
+result = client.columns.archive_with_ids(done_column.id)
+print(result.archived, result.ids)
+```
+
+Archiving a card that is already archived, or restoring one that isn't, raises `NotFoundError`. `columns.archive()` / `archive_with_ids()` only take effect on a column flagged `is_done` - any other column answers `archived=0` rather than an error.
 
 ### Board backgrounds
 
@@ -143,6 +176,37 @@ print(board.project.name, len(board.cards))
 ```
 
 The share token is the access check. Revoking sharing, or re-enabling it (which mints a fresh token), invalidates old links immediately and raises `NotFoundError`. The snapshot is trimmed: no workspace or ownership fields, and no card metadata beyond priority and assignee.
+
+### Webhooks and email-to-card
+
+Board admins on a Pro plan can wire a board up to outbound webhooks and an intake email address. Both are 402 (`PlanLimitError`) on a Free board for every operation except delete/disable, which stay open so a downgraded workspace can still clean up:
+
+```python
+catalogue = client.webhooks.list_for_project(project.id)
+print(catalogue.event_catalogue)   # broadcast names you can filter on
+
+hook = client.webhooks.create(
+    project.id,
+    url="https://hooks.slack.com/services/...",
+    format="slack",
+    events=["card.created", "card.archived"],
+)
+client.webhooks.update(hook.id, active=False)
+client.webhooks.delete(hook.id)
+```
+
+`hook.secret` is the HMAC signing secret for `"craaft"`-format deliveries (`X-Craaft-Signature`); it is returned on every read, not redacted. Slack and Discord deliveries are unsigned.
+
+```python
+status = client.inbound_email.get(project.id)
+if not status.enabled:
+    address = client.inbound_email.enable(project.id, target_column="todo")
+    print(address.email)   # mail sent here becomes a card
+
+client.inbound_email.update(project.id, rotate=True)     # mint a new address
+client.inbound_email.update(project.id, target_column="")  # clear back to the first column
+client.inbound_email.disable(project.id)
+```
 
 ## Bulk operations
 
@@ -191,14 +255,19 @@ Frozen dataclasses, keyword-only. Highlights:
 
 - `User`, `Project`, `Column`, `Card`, `Comment`, `Attachment`
 - `ChecklistItem`, `Milestone` (`due_on` is a `datetime.date`; `achieved_at` is `datetime | None`)
-- `CardSummary`, `AttentionCard`, `FocusResponse`, `HygieneCounts`, `CardEvent`
-- `BoardMember`, `BoardMemberGrant`, `WorkspaceMember`, `Invitation`
+- `SearchResult` (`cards.search()`), `UpcomingCard` (`cards.upcoming()` and `FocusResponse.due`), `AttentionCard`, `FocusResponse`, `HygieneCounts`, `CardEvent`
+- `BoardMember`, `BoardMemberGrant`, `WorkspaceMember`, `Invitation` (`consumed` is `True` when a verified account was added to the workspace immediately instead of being left pending)
+- `BoardTemplate` (+ `BoardTemplateColumn`), `ColumnArchiveResult`
+- `WebhookSubscription` (+ `WebhookDelivery`), `BoardWebhooks`
+- `InboundEmailAddress`, `InboundEmailStatus`
 - `ProjectExport` (+ nested export types)
 - `PublicBoard` (+ `PublicBoardProject`, `PublicBoardColumn`, `PublicBoardCard`)
 
-`Card.size` is an optional **integer** estimate. `Card.priority` is one of `low`, `medium`, `high`, `urgent`. `Card.checklist_done` / `Card.checklist_total` are denormalized checklist progress counts (0 when the card has no checklist). `Card.following` is whether **the authenticated caller** follows the card, so it differs per token for the same card. Set metadata via `cards.update()` after `create_card()` - the create endpoint only accepts `title`, `column`, `position`, and optional `description`.
+`Card.size` is an optional **integer** estimate. `Card.priority` is one of `low`, `medium`, `high`, `urgent`. `Card.checklist_done` / `Card.checklist_total` are denormalized checklist progress counts (0 when the card has no checklist). `Card.following` is whether **the authenticated caller** follows the card, so it differs per token for the same card. `Card.archived_at` is set only by `projects.list_archived_cards()`; `None` everywhere else, including a live card. Set metadata via `cards.update()` after `create_card()` - the create endpoint only accepts `title`, `column`, `position`, and optional `description`.
 
 `attachments.upload()` sends multipart form data (max **25 MiB** per file) and requires a Pro/Team workspace; use `project.can_upload_attachments` to check first.
+
+`CardSummary` is deprecated: it used to be the shared return type of both `search()` and `upcoming()`, which was a bug since the two endpoints return different shapes (one has no due date/assignee/priority, the other has no description/updated_at/archived). It has been split into `SearchResult` and `UpcomingCard`; `CardSummary` is kept importable, and the two replacements keep its unused fields around too (always their default) so old code reading them doesn't raise `AttributeError`, but new code should use the two specific types.
 
 ## Errors
 

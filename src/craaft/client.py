@@ -22,11 +22,13 @@ from craaft.resources.cards import CardsResource
 from craaft.resources.checklist import ChecklistResource
 from craaft.resources.columns import ColumnsResource
 from craaft.resources.comments import CommentsResource
+from craaft.resources.inbound_email import InboundEmailResource
 from craaft.resources.me import MeResource
 from craaft.resources.members import MembersResource
 from craaft.resources.milestones import MilestonesResource
 from craaft.resources.projects import ProjectsResource
 from craaft.resources.public import PublicResource
+from craaft.resources.webhooks import WebhooksResource
 
 DEFAULT_BASE_URL = "https://craaft.io/api/v1"
 DEFAULT_TIMEOUT = 30.0
@@ -139,6 +141,8 @@ class CraaftClient:
         self.checklist = ChecklistResource(self._transport)
         self.milestones = MilestonesResource(self._transport)
         self.public = PublicResource(self._transport)
+        self.webhooks = WebhooksResource(self._transport)
+        self.inbound_email = InboundEmailResource(self._transport)
 
     def version(self) -> dict[str, Any]:
         """Return the server's build info.

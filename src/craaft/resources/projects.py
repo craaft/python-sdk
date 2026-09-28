@@ -10,6 +10,7 @@ from craaft.models import (
     BoardMember,
     BoardMemberGrant,
     BoardRole,
+    BoardTemplate,
     Card,
     Column,
     Milestone,
@@ -47,10 +48,30 @@ class ProjectsResource(BaseResource):
         data = self._transport.request("GET", f"/projects/{id_seg(project_id)}")
         return Project.from_api(data)
 
-    def create(self, *, name: str, description: str | None = None) -> Project:
+    def list_templates(self) -> _list[BoardTemplate]:
+        """List the fixed catalogue of board templates.
+
+        Any authenticated user may read this, no plan gate. Pass a
+        template's ``key`` as ``template=`` to :meth:`create` to seed a new
+        board with its column layout instead of the default Kanban three.
+        """
+        data = self._transport.request("GET", "/board-templates")
+        return [BoardTemplate.from_api(t) for t in data]
+
+    def create(
+        self, *, name: str, description: str | None = None, template: str | None = None
+    ) -> Project:
+        """Create a project under the caller's personal workspace.
+
+        ``template`` is a key from :meth:`list_templates`; omit it (or pass
+        an empty string) for the default Kanban layout. An unrecognised key
+        raises :class:`~craaft.exceptions.ValidationError` (400).
+        """
         body: dict[str, object] = {"name": name}
         if description is not None:
             body["description"] = description
+        if template is not None:
+            body["template"] = template
         data = self._transport.request("POST", "/projects", json=body)
         return Project.from_api(data)
 
@@ -131,6 +152,19 @@ class ProjectsResource(BaseResource):
     def list_cards(self, project_id: str) -> _list[Card]:
         data = self._transport.request(
             "GET", f"/projects/{id_seg(project_id)}/cards"
+        )
+        return [Card.from_api(c) for c in data]
+
+    def list_archived_cards(self, project_id: str) -> _list[Card]:
+        """List a board's archived cards, most recently archived first.
+
+        Same board-list projection as :meth:`list_cards` (no description)
+        plus ``archived_at``, capped at 200 rows - older archived cards stay
+        reachable through :meth:`~craaft.resources.cards.CardsResource.search`.
+        An inaccessible board reads as an empty list rather than a 404.
+        """
+        data = self._transport.request(
+            "GET", f"/projects/{id_seg(project_id)}/cards/archived"
         )
         return [Card.from_api(c) for c in data]
 

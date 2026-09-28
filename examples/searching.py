@@ -1,20 +1,21 @@
 """Searching and listing upcoming cards.
 
-`cards.upcoming()` and `cards.search()` both return `CardSummary` objects
-rather than full `Card` objects. The summary carries enough to render a
-list view (title, due date, project name, column title) but skips fields
-like description, position, and timestamps. Fetch the full card with
-`projects.list_cards()` if you need them.
+`cards.upcoming()` returns `UpcomingCard` objects and `cards.search()`
+returns `SearchResult` objects - lightweight previews rather than full
+`Card` objects, each carrying only the fields their endpoint actually
+populates (an upcoming card has a due date but no description; a search hit
+has a description snippet but no due date). Fetch the full card with
+`projects.list_cards()` if you need everything.
 """
 
 from __future__ import annotations
 
 import sys
 
-from craaft import CardSummary, CraaftClient
+from craaft import CraaftClient, SearchResult, UpcomingCard
 
 
-def show(card: CardSummary) -> None:
+def show(card: SearchResult | UpcomingCard) -> None:
     bits = [card.title]
     if card.due_date:
         bits.append(f"due {card.due_date.date()}")

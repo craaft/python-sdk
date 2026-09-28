@@ -112,6 +112,60 @@ def test_create_omits_unset_description():
 
 
 @responses.activate
+def test_create_with_template():
+    responses.add(responses.POST, f"{BASE}/projects", json=_proj(), status=201)
+    c = CraaftClient(api_key="cra_x")
+    c.projects.create(name="Demo", template="sprint")
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"name": "Demo", "template": "sprint"}
+
+
+@responses.activate
+def test_create_unknown_template_raises_validation_error():
+    responses.add(
+        responses.POST,
+        f"{BASE}/projects",
+        json={"error": "unknown board template"},
+        status=400,
+    )
+    c = CraaftClient(api_key="cra_x")
+    with pytest.raises(ValidationError):
+        c.projects.create(name="Demo", template="no-such-template")
+
+
+@responses.activate
+def test_list_templates():
+    responses.add(
+        responses.GET,
+        f"{BASE}/board-templates",
+        json=[
+            {
+                "key": "kanban",
+                "name": "Kanban",
+                "description": "The classic three-lane flow.",
+                "columns": [
+                    {"title": "To Do", "color": "", "isDone": False},
+                    {"title": "In Progress", "color": "", "isDone": False},
+                    {"title": "Done", "color": "", "isDone": True},
+                ],
+            },
+            {
+                "key": "sprint",
+                "name": "Sprint",
+                "description": "Backlog through review for time-boxed work.",
+                "columns": [{"title": "Backlog", "color": "", "isDone": False}],
+            },
+        ],
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    templates = c.projects.list_templates()
+    assert [t.key for t in templates] == ["kanban", "sprint"]
+    assert templates[0].columns[-1].is_done is True
+    assert len(templates[0].columns) == 3
+
+
+@responses.activate
 def test_create_402_raises_plan_limit():
     responses.add(responses.POST, f"{BASE}/projects", json={"error": "limit"}, status=402)
     c = CraaftClient(api_key="cra_x")
@@ -170,6 +224,29 @@ def test_list_cards():
     c = CraaftClient(api_key="cra_x")
     cards = c.projects.list_cards("p1")
     assert cards[0].id == "card1"
+
+
+@responses.activate
+def test_list_archived_cards():
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/p1/cards/archived",
+        json=[dict(_card(), archivedAt="2026-05-09T09:00:00Z")],
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    cards = c.projects.list_archived_cards("p1")
+    assert cards[0].id == "card1"
+    assert cards[0].archived_at is not None
+
+
+@responses.activate
+def test_list_archived_cards_empty_for_inaccessible_board():
+    responses.add(
+        responses.GET, f"{BASE}/projects/missing/cards/archived", json=[], status=200
+    )
+    c = CraaftClient(api_key="cra_x")
+    assert c.projects.list_archived_cards("missing") == []
 
 
 @responses.activate

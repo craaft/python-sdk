@@ -27,6 +27,21 @@ class MembersResource(BaseResource):
         role: Literal["admin", "member"],
         board_grants: _list[tuple[str, BoardRole]] | None = None,
     ) -> Invitation:
+        """Invite a user by email.
+
+        ``board_grants`` is only honoured for ``role="member"`` invitations -
+        admin invitations auto-see every board. When the email already
+        belongs to a verified account, the invite is accepted on the spot:
+        the returned :class:`Invitation` has ``consumed=True`` and the
+        person is already a workspace member. An unverified account leaves
+        the invite pending (``consumed=False``) until the address is
+        confirmed.
+
+        The API wraps its response as ``{"invitation": ..., "consumed":
+        ...}`` rather than returning the invitation bare; this unwraps it
+        (tolerating a bare invitation object too, in case that ever changes
+        back) so the public return type stays a plain :class:`Invitation`.
+        """
         body: dict[str, object] = {"email": email, "role": role}
         if board_grants is not None:
             body["boardGrants"] = [
@@ -34,7 +49,17 @@ class MembersResource(BaseResource):
                 for project_id, grant_role in board_grants
             ]
         data = self._transport.request("POST", "/invitations", json=body)
-        return Invitation.from_api(data)
+        if isinstance(data, dict):
+            payload = data.get("invitation", data)
+            consumed = data.get("consumed", False)
+        else:
+            # Tolerate a bare invitation object too, in case the server
+            # ever stops wrapping it.
+            payload = data
+            consumed = False
+        merged = dict(payload)
+        merged.setdefault("consumed", consumed)
+        return Invitation.from_api(merged)
 
     def update_role(
         self, user_id: str, *, role: Literal["admin", "member"]
