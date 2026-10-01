@@ -21,7 +21,11 @@ class InboundEmailResource(BaseResource):
         return InboundEmailStatus.from_api(data)
 
     def enable(
-        self, project_id: str, *, target_column: str | None = None
+        self,
+        project_id: str,
+        *,
+        target_column: str | None = None,
+        ai_enrich: bool | None = None,
     ) -> InboundEmailAddress:
         """Mint the board's inbound address.
 
@@ -29,10 +33,15 @@ class InboundEmailResource(BaseResource):
         into the board's first column. Raises
         :class:`~craaft.exceptions.ConflictError` if the board already has
         an address - use :meth:`update` or :meth:`disable` instead.
+
+        ``ai_enrich`` turns AI cards for email threads on or off. Turning it
+        on returns a 409 when the server has no AI key.
         """
         body: dict[str, object] = {}
         if target_column is not None:
             body["targetColumn"] = target_column
+        if ai_enrich is not None:
+            body["aiEnrich"] = ai_enrich
         data = self._transport.request(
             "POST", f"/projects/{id_seg(project_id)}/inbound-email", json=body
         )
@@ -45,6 +54,7 @@ class InboundEmailResource(BaseResource):
         active: bool | None = None,
         target_column: str | None = None,
         rotate: bool | None = None,
+        ai_enrich: bool | None = None,
     ) -> InboundEmailAddress:
         """Partially update the board's inbound email configuration.
 
@@ -53,7 +63,8 @@ class InboundEmailResource(BaseResource):
         string ``""`` to clear it back to the board's first column, or pass
         a column key to target that column. ``rotate=True`` mints a new
         token (and therefore a new email address) while keeping the rest of
-        the configuration.
+        the configuration. ``ai_enrich`` turns AI cards for email threads on
+        or off. Turning it on returns a 409 when the server has no AI key.
         """
         body: dict[str, object] = {}
         if active is not None:
@@ -62,6 +73,8 @@ class InboundEmailResource(BaseResource):
             body["targetColumn"] = target_column
         if rotate is not None:
             body["rotate"] = rotate
+        if ai_enrich is not None:
+            body["aiEnrich"] = ai_enrich
         data = self._transport.request(
             "PATCH", f"/projects/{id_seg(project_id)}/inbound-email", json=body
         )

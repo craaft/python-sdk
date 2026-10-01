@@ -163,3 +163,48 @@ def test_disable_returns_none():
     responses.add(responses.DELETE, f"{BASE}/projects/p1/inbound-email", status=204)
     c = CraaftClient(api_key="cra_x")
     assert c.inbound_email.disable("p1") is None
+
+
+@responses.activate
+def test_update_ai_enrich_sends_the_flag_and_parses_it_back():
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/projects/p1/inbound-email",
+        json=_address({"aiEnrich": True}),
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    addr = c.inbound_email.update("p1", ai_enrich=True)
+    assert addr.ai_enrich is True
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"aiEnrich": True}
+
+
+@responses.activate
+def test_enable_ai_enrich_sends_the_flag():
+    responses.add(
+        responses.POST,
+        f"{BASE}/projects/p1/inbound-email",
+        json=_address({"aiEnrich": True}),
+        status=201,
+    )
+    c = CraaftClient(api_key="cra_x")
+    addr = c.inbound_email.enable("p1", ai_enrich=True)
+    assert addr.ai_enrich is True
+    body = json.loads(responses.calls[0].request.body)
+    assert body == {"aiEnrich": True}
+
+
+@responses.activate
+def test_get_parses_ai_available_and_defaults_ai_enrich_off():
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/p1/inbound-email",
+        json={"enabled": True, "address": _address(), "aiAvailable": True},
+        status=200,
+    )
+    c = CraaftClient(api_key="cra_x")
+    status = c.inbound_email.get("p1")
+    assert status.ai_available is True
+    assert status.address is not None
+    assert status.address.ai_enrich is False

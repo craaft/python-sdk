@@ -1073,6 +1073,7 @@ class InboundEmailAddress:
     token: str
     target_column: str | None
     active: bool
+    ai_enrich: bool
     created_at: datetime
 
     @classmethod
@@ -1082,6 +1083,7 @@ class InboundEmailAddress:
             token=data["token"],
             target_column=data.get("targetColumn"),
             active=bool(data.get("active", False)),
+            ai_enrich=bool(data.get("aiEnrich", False)),
             created_at=_parse_dt(data["createdAt"]),
         )
 
@@ -1098,6 +1100,7 @@ class InboundEmailStatus:
 
     enabled: bool
     address: InboundEmailAddress | None = None
+    ai_available: bool = False
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> InboundEmailStatus:
@@ -1105,4 +1108,5 @@ class InboundEmailStatus:
         return cls(
             enabled=bool(data.get("enabled", False)),
             address=InboundEmailAddress.from_api(addr_raw) if addr_raw else None,
+            ai_available=bool(data.get("aiAvailable", False)),
         )
