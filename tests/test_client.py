@@ -88,6 +88,7 @@ def test_resource_sub_clients_present():
     assert c.public is not None
     assert c.webhooks is not None
     assert c.inbound_email is not None
+    assert c.notifications is not None
 
 
 def test_context_manager_closes():

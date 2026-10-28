@@ -487,3 +487,14 @@ def test_project_from_api_with_columns():
     assert p.can_upload_attachments is True
     assert len(p.members) == 1
     assert p.members[0].name == "Alice"
+
+
+def test_parse_dt_accepts_any_fraction_length():
+    # The server trims trailing zeros, so 1 to 9 digits all occur.
+    from craaft.models import _parse_dt
+
+    assert _parse_dt("2026-10-27T10:00:00.12345Z").microsecond == 123450
+    assert _parse_dt("2026-10-27T10:00:00.1Z").microsecond == 100000
+    assert _parse_dt("2026-10-27T10:00:00.123456789Z").microsecond == 123456
+    assert _parse_dt("2026-10-27T10:00:00Z").microsecond == 0
+    assert _parse_dt("2026-10-27T12:00:00.5+02:00").utcoffset().total_seconds() == 7200

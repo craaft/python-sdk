@@ -109,6 +109,7 @@ client = CraaftClient(
 | `client.members`    | `list()`, `update_role(user_id, role=)`, `remove(user_id)`, `list_invitations()`, `create_invitation(...)`, `revoke_invitation(id)` |
 | `client.webhooks`   | `list_for_project(project_id)`, `create(project_id, url=, ...)`, `update(id, ...)`, `delete(id)` |
 | `client.inbound_email` | `get(project_id)`, `enable(project_id, target_column=)`, `update(project_id, ...)`, `disable(project_id)` |
+| `client.notifications` | `list(before=, limit=30, unread=, kind=)`, `iter_all(limit=50, unread=, kind=)`, `count()`, `mark_seen(up_to)`, `mark_read(ids, card_id=)`, `read_all()` |
 | `client.public`     | `board(token)`, `board_background(token)`, `avatar(user_id)` - no auth required |
 
 `search()` returns `list[SearchResult]` and `upcoming()` returns `list[UpcomingCard]` - lightweight, endpoint-specific previews (see [Models](#models)). `focus()` returns a `FocusResponse` with `due` (`list[UpcomingCard]`), `attention`, and `hygiene` buckets. `client.version()` returns the server's build info and needs no auth, which makes it a cheap liveness probe.
@@ -208,6 +209,45 @@ client.inbound_email.update(project.id, target_column="")  # clear back to the f
 client.inbound_email.disable(project.id)
 ```
 
+### Notifications
+
+The caller's inbox of mentions, assignments, comments, moves, updates and due reminders. List my mentions:
+
+```python
+for n in client.notifications.iter_all(kind="mention"):
+    who = ", ".join(a.name for a in n.actors)
+    print(n.created_at, who, n.card.title, n.excerpt)
+```
+
+`iter_all()` follows the `next_before` cursor until the server returns `None`. To page by hand, pass `next_before` back as `before=`:
+
+```python
+page = client.notifications.list(unread=True, limit=20)
+while page.next_before is not None:
+    page = client.notifications.list(unread=True, limit=20, before=page.next_before)
+```
+
+Always page with `next_before`, never the last row's `created_at`. Rows are grouped (unread comment, move and update notifications on one card merge into a single row with `kind="group"`), and a group carries its newest member's time, so the last row's time would skip rows. For the same reason a page can hold fewer than `limit` rows while older ones still exist.
+
+`kind=` filters on one of `mention`, `assigned`, `comment`, `moved`, `updated` or `due`; `"group"` is not a valid filter, and an unknown kind raises `ValidationError` (400). `limit` must be between 1 and 50.
+
+Seen and read are separate. Seen clears the unseen badge; read marks individual rows as handled:
+
+```python
+unseen = client.notifications.count()
+
+page = client.notifications.list()
+if page.items:
+    newest = page.items[0]
+    client.notifications.mark_seen(newest.created_at)   # everything up to the newest row
+    client.notifications.mark_read(newest.ids)          # one row, every id in a group
+
+client.notifications.mark_read(card_id=card.id)         # everything on one card
+client.notifications.read_all()
+```
+
+Each write returns the new unseen count. `mark_read()` needs `ids` (at most 200), `card_id`, or both, and raises `ValueError` before sending a request otherwise.
+
 ## Bulk operations
 
 Three methods batch card work into a single all-or-nothing transaction (max 100 items each). Items are dicts using the API's camelCase field names, passed through verbatim:
@@ -260,6 +300,7 @@ Frozen dataclasses, keyword-only. Highlights:
 - `BoardTemplate` (+ `BoardTemplateColumn`), `ColumnArchiveResult`
 - `WebhookSubscription` (+ `WebhookDelivery`), `BoardWebhooks`
 - `InboundEmailAddress`, `InboundEmailStatus`
+- `Notification` (+ `NotificationCard`, `NotificationActor`), `NotificationPage` (`next_before` is a string cursor, kept unparsed so it round-trips exactly)
 - `ProjectExport` (+ nested export types)
 - `PublicBoard` (+ `PublicBoardProject`, `PublicBoardColumn`, `PublicBoardCard`)
 

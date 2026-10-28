@@ -7,14 +7,20 @@ and tolerates extra unknown keys (forward-compat with new server fields).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Literal
+
+# The server trims trailing zeros from fractional seconds and may send up to
+# 9 digits. Python 3.10's fromisoformat only takes 3 or 6, so pad or cut to 6.
+_FRACTION = re.compile(r"\.(\d+)(?=[+-]\d\d:\d\d$)")
 
 
 def _parse_dt(value: str) -> datetime:
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"
+    value = _FRACTION.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), value)
     return datetime.fromisoformat(value)
 
 
@@ -38,6 +44,13 @@ HygieneType = Literal["ghosts", "stuck", "mine_no_date"]
 CardEventType = Literal["moved", "moved_board", "priority", "assignee"]
 WebhookFormat = Literal["craaft", "slack", "discord"]
 DeliveryStatus = Literal["delivered", "failed"]
+# Stored notification kinds, and so the values ``kind=`` accepts as a filter.
+NotificationKind = Literal["mention", "assigned", "comment", "moved", "updated", "due"]
+# A row can also be "group": unread comment/moved/updated rows on one card
+# merged into one line. Never valid as a filter.
+NotificationRowKind = Literal[
+    "mention", "assigned", "comment", "moved", "updated", "due", "group"
+]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1109,4 +1122,107 @@ class InboundEmailStatus:
             enabled=bool(data.get("enabled", False)),
             address=InboundEmailAddress.from_api(addr_raw) if addr_raw else None,
             ai_available=bool(data.get("aiAvailable", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NotificationCard:
+    """The card a notification is about. ``archived`` is ``True`` when the
+    card has since been archived; the row stays in the inbox either way."""
+
+    id: str
+    title: str
+    project_id: str
+    project_name: str
+    archived: bool
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> NotificationCard:
+        return cls(
+            id=data["id"],
+            title=data.get("title", ""),
+            project_id=data["projectId"],
+            project_name=data.get("projectName", ""),
+            archived=bool(data.get("archived", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NotificationActor:
+    id: str
+    name: str
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> NotificationActor:
+        return cls(id=data["id"], name=data.get("name", ""))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Notification:
+    """One inbox row from ``GET /me/notifications``.
+
+    A row can stand for several stored notifications: when ``kind`` is
+    ``"group"``, unread comment/moved/updated notifications on one card
+    have been merged, and ``created_at`` is the newest member's. ``ids``,
+    ``kinds`` and ``details`` are parallel lists with one entry per stored
+    notification; pass ``ids`` to
+    :meth:`~craaft.resources.notifications.NotificationsResource.mark_read`.
+
+    ``details`` qualifies each kind: ``"card"`` or ``"comment"`` for a
+    mention, ``"column"`` or ``"board"`` for a move, the update kind for an
+    update, ``"tomorrow"`` or ``"today"`` for a due reminder, and ``""``
+    otherwise. ``comment_id`` is set only for a mention made in a comment.
+    ``actors`` is empty for due reminders, which have no actor.
+    """
+
+    ids: list[str]
+    kind: NotificationRowKind
+    kinds: list[str]
+    details: list[str]
+    card: NotificationCard
+    actors: list[NotificationActor]
+    count: int
+    created_at: datetime
+    seen: bool
+    read: bool
+    comment_id: str | None = None
+    excerpt: str | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> Notification:
+        return cls(
+            ids=[str(i) for i in data.get("ids") or []],
+            kind=data["kind"],
+            kinds=list(data.get("kinds") or []),
+            details=list(data.get("details") or []),
+            card=NotificationCard.from_api(data["card"]),
+            actors=[NotificationActor.from_api(a) for a in data.get("actors") or []],
+            count=int(data.get("count", 0)),
+            created_at=_parse_dt(data["createdAt"]),
+            seen=bool(data.get("seen", False)),
+            read=bool(data.get("read", False)),
+            comment_id=data.get("commentId") or None,
+            excerpt=data.get("excerpt") or None,
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NotificationPage:
+    """One page of ``GET /me/notifications``.
+
+    ``next_before`` is the cursor for the next page (pass it back as
+    ``before=``), or ``None`` when there is nothing older. Always use it
+    rather than the last row's ``created_at``: rows are grouped, and a
+    group carries its newest member's time, so that would skip rows. It
+    stays a string so its full precision survives the round trip.
+    """
+
+    items: list[Notification]
+    next_before: str | None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> NotificationPage:
+        return cls(
+            items=[Notification.from_api(n) for n in data.get("items") or []],
+            next_before=data.get("nextBefore") or None,
         )

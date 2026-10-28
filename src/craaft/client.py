@@ -26,6 +26,7 @@ from craaft.resources.inbound_email import InboundEmailResource
 from craaft.resources.me import MeResource
 from craaft.resources.members import MembersResource
 from craaft.resources.milestones import MilestonesResource
+from craaft.resources.notifications import NotificationsResource
 from craaft.resources.projects import ProjectsResource
 from craaft.resources.public import PublicResource
 from craaft.resources.webhooks import WebhooksResource
@@ -143,6 +144,7 @@ class CraaftClient:
         self.public = PublicResource(self._transport)
         self.webhooks = WebhooksResource(self._transport)
         self.inbound_email = InboundEmailResource(self._transport)
+        self.notifications = NotificationsResource(self._transport)
 
     def version(self) -> dict[str, Any]:
         """Return the server's build info.
